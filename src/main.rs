@@ -3,6 +3,7 @@ mod events;
 mod heartbeat;
 mod logging;
 mod server;
+mod shutdown;
 
 use std::process;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use heartbeat::Heartbeat;
 use logging::{LogLevel, Logger, LoggerConfig};
 use serde_json::json;
 use server::TcpServer;
+use shutdown::ShutdownHooks;
 
 fn main() {
     let app_config = load_config_or_exit();
@@ -76,8 +78,6 @@ fn main() {
         Some(heartbeat.initial_metadata_payload()),
     );
     heartbeat.start().expect("heartbeat should start");
-    std::thread::sleep(Duration::from_millis(120));
-    heartbeat.stop().expect("heartbeat should stop");
 
     println!("{}", greeting());
 
@@ -91,7 +91,44 @@ fn main() {
         })),
     );
 
-    let _server = server;
+    let shutdown_hooks = ShutdownHooks::install().unwrap_or_else(|error| {
+        eprintln!("failed to install shutdown hooks: {error}");
+        process::exit(2);
+    });
+    logger.info(
+        Some("main::shutdown"),
+        "Shutdown hooks installed for SIGINT/SIGTERM",
+    );
+
+    while !shutdown_hooks.is_triggered() {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    logger.info(
+        Some("main::shutdown"),
+        "Shutdown signal received, starting graceful shutdown",
+    );
+    emitter.begin_shutdown();
+    heartbeat.stop().expect("heartbeat should stop");
+
+    let drained = emitter.wait_for_idle(Duration::from_secs(3));
+    if drained {
+        logger.info(
+            Some("main::shutdown"),
+            "All running listeners completed before timeout",
+        );
+    } else {
+        logger.warn(
+            Some("main::shutdown"),
+            "Listener drain timeout reached; continuing shutdown",
+        );
+    }
+
+    drop(server);
+    logger.info(
+        Some("main::shutdown"),
+        "TCP server stopped and shutdown completed",
+    );
 }
 
 fn load_config_or_exit() -> AppConfig {

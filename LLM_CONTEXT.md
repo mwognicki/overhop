@@ -37,6 +37,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 14. TCP server startup is implemented in `src/server/mod.rs`:
    - Keep listener non-blocking.
    - Keep host/port sourced from `AppConfig.server` (default `0.0.0.0:9876`).
+15. Graceful shutdown flow is coordinated via `src/shutdown/mod.rs` and `src/events/mod.rs`:
+   - Handle `SIGINT`/`SIGTERM` through shutdown hooks.
+   - On shutdown, prevent new listener starts and use best-effort listener drain waiting.
 
 ## Intent
 

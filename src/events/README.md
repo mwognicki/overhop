@@ -18,6 +18,8 @@ Provide a Node-inspired event emitter facade for internal pub/sub flow, with exp
 - `on_async(...)`: register asynchronous listener (`Fn(Event) -> Result<(), String>`)
 - `emit(...)`: run sync listeners first, then dispatch async listeners
 - `emit_or_exit(...)`: runtime-enforced exit path for sync failures
+- `begin_shutdown()`: prevents new listener execution starts
+- `wait_for_idle(timeout)`: best-effort wait for running listeners to finish
 
 ## Most Relevant Features
 
@@ -26,6 +28,7 @@ Provide a Node-inspired event emitter facade for internal pub/sub flow, with exp
 - Panic best-effort recovery for listeners via `catch_unwind`.
 - Asynchronous listener failures are isolated and reported without failing the emitter call.
 - Payload support via optional `serde_json::Value`.
+- Shutdown-aware listener lifecycle control for graceful teardown.
 
 ## Extension Direction
 
