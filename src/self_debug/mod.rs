@@ -38,6 +38,7 @@ pub enum SelfDebugError {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RuntimeFlags {
     pub enabled: bool,
+    pub keep_artifacts: bool,
 }
 
 impl fmt::Display for SelfDebugError {
@@ -67,6 +68,8 @@ pub fn extract_runtime_flags(args: Vec<String>) -> (RuntimeFlags, Vec<String>) {
     for arg in args {
         if arg == "--self-debug" {
             flags.enabled = true;
+        } else if arg == "--self-debug-keep-artifacts" {
+            flags.keep_artifacts = true;
         } else {
             config_args.push(arg);
         }

@@ -3,6 +3,7 @@
 # Every key may be overridden through argv with dotted notation.
 # Runtime-only flags:
 #   --self-debug
+#   --self-debug-keep-artifacts
 
 [logging]
 # error | warn | info | debug | verbose

@@ -294,9 +294,11 @@ fn main() {
     let _wire_codec = wire_codec;
 
     let mut self_debug_cleanup_error: Option<self_debug::SelfDebugError> = None;
-    if let Some(path) = self_debug_artifacts_path {
-        if let Err(error) = self_debug::cleanup_artifacts(path.as_path()) {
-            self_debug_cleanup_error = Some(error);
+    if !runtime_flags.keep_artifacts {
+        if let Some(path) = self_debug_artifacts_path {
+            if let Err(error) = self_debug::cleanup_artifacts(path.as_path()) {
+                self_debug_cleanup_error = Some(error);
+            }
         }
     }
 

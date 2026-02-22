@@ -18,6 +18,7 @@
 #
 # Runtime-only flags:
 #   --self-debug
+#   --self-debug-keep-artifacts
 
 [logging]
 # Allowed: error, warn, info, debug, verbose
