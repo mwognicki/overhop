@@ -49,6 +49,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 17. Base wire envelope abstraction lives in `src/wire/envelope/mod.rs`:
    - Keep fixed envelope fields (`v`, `t`, `rid`, `p`) mandatory and version fixed at `2`.
    - Keep unknown envelope fields ignored during parsing.
+   - Reserve generic server-to-client message types `OK` (`t=101`) and `ERR` (`t=102`), with `ERR` carrying standard payload (`code`, optional `msg`, optional `details`).
 18. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Promotion must remove from anonymous pool and create worker with immutable UUID/promoted timestamp and mutable `last_seen_at`.
