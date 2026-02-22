@@ -18,6 +18,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Create and work on `feat/*`, `quickfix/*`, or `chore/*` branches.
    - Avoid direct pushes to `main`.
    - Prefer merging through PRs from topic branch to `main`.
+9. Logging is implemented as a pluggable facade in `src/logging/mod.rs`:
+   - Keep domain/business code coupled only to `Logger` API.
+   - Keep output/backend details behind the `LogSink` abstraction.
 
 ## Intent
 
