@@ -1,0 +1,34 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - 'src/**'
+      - 'Cargo.lock'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --locked --all-targets
