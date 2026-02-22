@@ -428,6 +428,15 @@ impl WorkersPool {
             .expect("workers pool lock poisoned")
             .len()
     }
+
+    pub fn active_connections(&self) -> Vec<(Uuid, Arc<PersistentConnection>)> {
+        self.records
+            .lock()
+            .expect("workers pool lock poisoned")
+            .iter()
+            .map(|(worker_id, record)| (*worker_id, Arc::clone(&record.connection)))
+            .collect()
+    }
 }
 
 #[derive(Default)]

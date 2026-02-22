@@ -17,6 +17,7 @@ Provide transport-level wire protocol building blocks while keeping framing/seri
 - `handshake`: minimal HELLO/HI protocol agreement exchange.
 - `session`: anonymous session ordering + REGISTER flow validation/actions.
   - includes IDENT challenge frame support for stale helloed/unregistered connections
+  - includes worker `PING/PONG` request-response helpers
 - `PROTOCOL.md`: implementation-tracking wire protocol draft/spec.
 
 ## Extension Direction

@@ -5,7 +5,9 @@ use crate::wire::envelope::{EnvelopeError, WireEnvelope};
 use crate::wire::handshake::{process_client_handshake_frame, HELLO_MESSAGE_TYPE};
 
 pub const REGISTER_MESSAGE_TYPE: i64 = 2;
+pub const PING_MESSAGE_TYPE: i64 = 3;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
+pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
 pub const REGISTER_TIMEOUT_CODE: &str = "REGISTER_TIMEOUT";
 pub const CONNECTION_TIMEOUT_CODE: &str = "CONNECTION_TIMEOUT";
@@ -14,6 +16,11 @@ pub const CONNECTION_TIMEOUT_CODE: &str = "CONNECTION_TIMEOUT";
 pub enum AnonymousProtocolAction {
     HelloAccepted { response_frame: Vec<u8> },
     RegisterRequested { request_id: String },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum WorkerProtocolAction {
+    PingRequested { request_id: String },
 }
 
 #[derive(Debug)]
@@ -101,6 +108,37 @@ pub fn evaluate_anonymous_client_frame(
     })
 }
 
+pub fn evaluate_worker_client_frame(
+    codec: &WireCodec,
+    frame: &[u8],
+) -> Result<WorkerProtocolAction, SessionError> {
+    let raw = codec.decode_frame(frame).map_err(SessionError::Codec)?;
+    let envelope = WireEnvelope::from_raw(&raw).map_err(SessionError::Envelope)?;
+    envelope
+        .validate_client_to_server()
+        .map_err(SessionError::Envelope)?;
+
+    if envelope.message_type != PING_MESSAGE_TYPE {
+        return Err(SessionError::ProtocolViolation {
+            request_id: Some(envelope.request_id),
+            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+            message: "registered workers can currently send only PING".to_owned(),
+        });
+    }
+
+    if !envelope.payload.is_empty() {
+        return Err(SessionError::ProtocolViolation {
+            request_id: Some(envelope.request_id),
+            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+            message: "PING payload must be an empty map".to_owned(),
+        });
+    }
+
+    Ok(WorkerProtocolAction::PingRequested {
+        request_id: envelope.request_id,
+    })
+}
+
 pub fn build_protocol_error_frame(
     codec: &WireCodec,
     request_id: &str,
@@ -147,6 +185,24 @@ pub fn build_ident_frame(
         .map_err(SessionError::Codec)
 }
 
+pub fn build_pong_frame(
+    codec: &WireCodec,
+    request_id: &str,
+    server_time_rfc3339: &str,
+) -> Result<Vec<u8>, SessionError> {
+    let mut payload = crate::wire::envelope::PayloadMap::new();
+    payload.insert(
+        "server_time".to_owned(),
+        rmpv::Value::String(server_time_rfc3339.into()),
+    );
+
+    codec
+        .encode_frame(
+            &WireEnvelope::new(PONG_MESSAGE_TYPE, request_id, payload).into_raw(),
+        )
+        .map_err(SessionError::Codec)
+}
+
 fn to_protocol_if_handshake_error(
     source: crate::wire::handshake::HandshakeError,
 ) -> SessionError {
@@ -163,8 +219,9 @@ mod tests {
 
     use super::{
         AnonymousProtocolAction, IDENT_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE,
-        REGISTER_MESSAGE_TYPE, build_ident_frame, build_protocol_error_frame,
-        evaluate_anonymous_client_frame,
+        PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, WorkerProtocolAction,
+        build_ident_frame, build_pong_frame, build_protocol_error_frame,
+        evaluate_anonymous_client_frame, evaluate_worker_client_frame,
     };
 
     #[test]
@@ -285,5 +342,54 @@ mod tests {
             envelope.payload.get("reply_deadline"),
             Some(&rmpv::Value::String("2026-02-22T12:00:00.000Z".into()))
         );
+    }
+
+    #[test]
+    fn worker_ping_is_accepted_and_can_build_pong() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let ping = crate::wire::envelope::WireEnvelope::new(
+            PING_MESSAGE_TYPE,
+            "rid-ping",
+            PayloadMap::new(),
+        );
+        let ping_frame = codec
+            .encode_frame(&ping.into_raw())
+            .expect("ping should encode");
+
+        let action =
+            evaluate_worker_client_frame(&codec, &ping_frame).expect("ping should be accepted");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::PingRequested {
+                request_id: "rid-ping".to_owned()
+            }
+        );
+
+        let pong_frame = build_pong_frame(&codec, "rid-ping", "2026-02-22T12:00:00.000Z")
+            .expect("pong frame should build");
+        let decoded = codec.decode_frame(&pong_frame).expect("decode pong frame");
+        let envelope = crate::wire::envelope::WireEnvelope::from_raw(&decoded)
+            .expect("parse pong envelope");
+        assert_eq!(envelope.message_type, PONG_MESSAGE_TYPE);
+        assert_eq!(envelope.request_id, "rid-ping");
+        assert_eq!(
+            envelope.payload.get("server_time"),
+            Some(&rmpv::Value::String("2026-02-22T12:00:00.000Z".into()))
+        );
+    }
+
+    #[test]
+    fn worker_ping_requires_empty_payload() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut payload = PayloadMap::new();
+        payload.insert("x".to_owned(), rmpv::Value::Boolean(true));
+        let ping = crate::wire::envelope::WireEnvelope::new(PING_MESSAGE_TYPE, "rid-p", payload);
+        let frame = codec
+            .encode_frame(&ping.into_raw())
+            .expect("ping should encode");
+
+        let err =
+            evaluate_worker_client_frame(&codec, &frame).expect_err("ping payload must be empty");
+        assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
     }
 }

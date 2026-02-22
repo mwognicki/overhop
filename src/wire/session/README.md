@@ -10,6 +10,7 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Supports REGISTER request validation and transition signaling.
 - Builds protocol violation `ERR` response frames.
 - Builds IDENT challenge frames (`t=104`) for delayed unregistered anonymous clients.
+- Supports worker-side PING request validation and PONG response frame construction.
 
 ## Most Relevant Features
 
@@ -17,4 +18,5 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - After successful `HELLO`, only `REGISTER` is currently allowed.
 - `REGISTER` payload must be empty map.
 - IDENT challenge payload includes register timeout and reply deadline metadata.
+- Worker `PING` payload must be empty map, and `PONG` includes server timestamp.
 - Exposes action-oriented result so runtime can apply pool transitions (e.g., anonymous -> worker promotion).
