@@ -11,6 +11,7 @@ on:
     paths:
       - 'src/**'
       - 'Cargo.lock'
+      - '.github/workflows/pr-tests.yml'
 
 permissions:
   contents: read
@@ -32,3 +33,38 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked --all-targets
+
+      - name: Run self-debug mode checks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEEP_PATH="${RUNNER_TEMP}/overhop-self-debug-keep"
+          REGULAR_PATH="${RUNNER_TEMP}/overhop-regular-data"
+
+          rm -rf "${KEEP_PATH}" "${REGULAR_PATH}"
+
+          # Run #1: self-debug creates artifacts and keeps them.
+          RUSTFLAGS="-Awarnings" cargo run --locked -- \
+            --self-debug \
+            --self-debug-keep-artifacts \
+            --storage.path "${REGULAR_PATH}" \
+            --storage.self_debug_path "${KEEP_PATH}"
+
+          if [ ! -d "${KEEP_PATH}" ]; then
+            echo "expected self-debug artifacts to be kept at ${KEEP_PATH}"
+            exit 1
+          fi
+
+          # Run #2: self-debug reuses artifacts from run #1.
+          # This validates that a subsequent run can open/access existing data.
+          RUSTFLAGS="-Awarnings" cargo run --locked -- \
+            --self-debug \
+            --storage.path "${REGULAR_PATH}" \
+            --storage.self_debug_path "${KEEP_PATH}"
+
+          # Optional side-check: without keep flag, artifacts should be cleaned.
+          if [ -d "${KEEP_PATH}" ]; then
+            echo "expected self-debug artifacts cleanup at ${KEEP_PATH}"
+            exit 1
+          fi

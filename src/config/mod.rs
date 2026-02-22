@@ -2,10 +2,10 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use toml::Value;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AppConfig {
     pub logging: LoggingConfig,
     pub heartbeat: HeartbeatConfig,
@@ -15,32 +15,32 @@ pub struct AppConfig {
     pub storage: StorageConfig,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LoggingConfig {
     pub level: String,
     pub human_friendly: bool,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct HeartbeatConfig {
     pub interval_ms: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
     pub tls_enabled: bool,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WireConfig {
     pub max_envelope_size_bytes: u64,
     #[serde(default)]
     pub session: WireSessionConfig,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WireSessionConfig {
     pub unhelloed_max_lifetime_seconds: u64,
     pub helloed_unregistered_max_lifetime_seconds: u64,
@@ -57,7 +57,7 @@ impl Default for WireSessionConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct StorageConfig {
     pub engine: String,
     pub path: String,
@@ -77,10 +77,56 @@ impl Default for StorageConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
 pub struct SledConfig {
     pub cache_capacity: Option<u64>,
     pub mode: Option<String>,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: "debug".to_owned(),
+            human_friendly: false,
+        }
+    }
+}
+
+impl Default for HeartbeatConfig {
+    fn default() -> Self {
+        Self { interval_ms: 1000 }
+    }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "0.0.0.0".to_owned(),
+            port: 9876,
+            tls_enabled: false,
+        }
+    }
+}
+
+impl Default for WireConfig {
+    fn default() -> Self {
+        Self {
+            max_envelope_size_bytes: 8_388_608,
+            session: WireSessionConfig::default(),
+        }
+    }
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            logging: LoggingConfig::default(),
+            heartbeat: HeartbeatConfig::default(),
+            server: ServerConfig::default(),
+            wire: WireConfig::default(),
+            storage: StorageConfig::default(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -93,7 +139,7 @@ impl AppConfig {
             source,
         })?;
 
-        let mut root_value: Value =
+        let file_value: Value =
             toml_content
                 .parse()
                 .map_err(|source| ConfigError::TomlParse {
@@ -101,19 +147,43 @@ impl AppConfig {
                     source,
                 })?;
 
+        let mut root_value =
+            Value::try_from(Self::default()).map_err(ConfigError::SerializeDefaults)?;
+        merge_values(&mut root_value, file_value);
+
+        Self::load_from_value_with_args(root_value, args)
+    }
+
+    pub fn load_with_discovery(
+        args: impl IntoIterator<Item = String>,
+    ) -> Result<Self, ConfigError> {
+        let parsed_args = args.into_iter().collect::<Vec<_>>();
+        match resolve_config_path() {
+            Ok(config_path) => Self::load_from_toml_with_args(config_path, parsed_args),
+            Err(ConfigError::ConfigNotFound { .. }) => {
+                Self::load_from_defaults_with_args(parsed_args)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn load_from_defaults_with_args(
+        args: impl IntoIterator<Item = String>,
+    ) -> Result<Self, ConfigError> {
+        let root = Value::try_from(Self::default()).map_err(ConfigError::SerializeDefaults)?;
+        Self::load_from_value_with_args(root, args)
+    }
+
+    fn load_from_value_with_args(
+        mut root_value: Value,
+        args: impl IntoIterator<Item = String>,
+    ) -> Result<Self, ConfigError> {
         let overrides = parse_cli_overrides(args)?;
         for (key_path, raw_value) in overrides {
             apply_override(&mut root_value, &key_path, &raw_value)?;
         }
 
         root_value.try_into().map_err(ConfigError::Deserialize)
-    }
-
-    pub fn load_with_discovery(
-        args: impl IntoIterator<Item = String>,
-    ) -> Result<Self, ConfigError> {
-        let config_path = resolve_config_path()?;
-        Self::load_from_toml_with_args(config_path, args)
     }
 }
 
@@ -128,6 +198,7 @@ pub enum ConfigError {
         source: toml::de::Error,
     },
     Deserialize(toml::de::Error),
+    SerializeDefaults(toml::ser::Error),
     MissingValueForArg {
         key: String,
     },
@@ -163,6 +234,9 @@ impl fmt::Display for ConfigError {
                 write!(f, "failed to parse TOML config '{path}': {source}")
             }
             Self::Deserialize(source) => write!(f, "failed to deserialize config: {source}"),
+            Self::SerializeDefaults(source) => {
+                write!(f, "failed to construct default config: {source}")
+            }
             Self::MissingValueForArg { key } => {
                 write!(f, "missing value for CLI override '--{key}'")
             }
@@ -278,11 +352,15 @@ fn apply_override(root: &mut Value, key_path: &str, raw_value: &str) -> Result<(
         .ok_or_else(|| ConfigError::UnknownPath {
             key: key_path.to_owned(),
         })?;
-    let current_value = table
-        .get_mut(final_key)
-        .ok_or_else(|| ConfigError::UnknownPath {
+    let Some(current_value) = table.get_mut(final_key) else {
+        if key_path == "storage.self_debug_path" {
+            table.insert(final_key.to_owned(), Value::String(raw_value.to_owned()));
+            return Ok(());
+        }
+        return Err(ConfigError::UnknownPath {
             key: key_path.to_owned(),
-        })?;
+        });
+    };
 
     let parsed_value = parse_value_using_current_type(key_path, raw_value, current_value)?;
     *current_value = parsed_value;
@@ -331,6 +409,28 @@ fn parse_value_using_current_type(
             Err(ConfigError::UnsupportedOverrideType {
                 key: key_path.to_owned(),
             })
+        }
+    }
+}
+
+fn merge_values(base: &mut Value, overlay: Value) {
+    match overlay {
+        Value::Table(overlay_table) => {
+            if let Some(base_table) = base.as_table_mut() {
+                for (key, value) in overlay_table {
+                    match base_table.get_mut(&key) {
+                        Some(existing) => merge_values(existing, value),
+                        None => {
+                            base_table.insert(key, value);
+                        }
+                    }
+                }
+            } else {
+                *base = Value::Table(overlay_table);
+            }
+        }
+        other => {
+            *base = other;
         }
     }
 }
@@ -459,6 +559,8 @@ path = "~/.overhop/data"
                 "3".to_owned(),
                 "--storage.path".to_owned(),
                 "/tmp/overhop-data".to_owned(),
+                "--storage.self_debug_path".to_owned(),
+                "/tmp/overhop-data-self-debug".to_owned(),
             ],
         )
         .expect("config with overrides should load");
@@ -478,6 +580,10 @@ path = "~/.overhop/data"
         );
         assert_eq!(config.wire.session.ident_register_timeout_seconds, 3);
         assert_eq!(config.storage.path, "/tmp/overhop-data");
+        assert_eq!(
+            config.storage.self_debug_path,
+            Some("/tmp/overhop-data-self-debug".to_owned())
+        );
         assert_eq!(config.storage.sled.cache_capacity, None);
         assert_eq!(config.storage.sled.mode, None);
     }
@@ -542,5 +648,38 @@ path = "~/.overhop/data"
         fs::remove_dir_all(&base).expect("failed to clean temp candidate directory");
 
         assert_eq!(selected, Some(found));
+    }
+
+    #[test]
+    fn defaults_loader_uses_expected_defaults() {
+        let config = AppConfig::load_from_defaults_with_args(Vec::<String>::new())
+            .expect("defaults loader should return built-in defaults");
+
+        assert_eq!(config.logging.level, "debug");
+        assert!(!config.logging.human_friendly);
+        assert_eq!(config.heartbeat.interval_ms, 1000);
+        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.port, 9876);
+        assert!(!config.server.tls_enabled);
+        assert_eq!(config.wire.max_envelope_size_bytes, 8_388_608);
+        assert_eq!(config.storage.engine, "sled");
+        assert_eq!(config.storage.path, "~/.overhop/data");
+    }
+
+    #[test]
+    fn defaults_loader_applies_overrides() {
+        let config = AppConfig::load_from_defaults_with_args(vec![
+            "--logging.level".to_owned(),
+            "verbose".to_owned(),
+            "--server.port".to_owned(),
+            "9999".to_owned(),
+            "--storage.path".to_owned(),
+            "/tmp/overhop-fallback".to_owned(),
+        ])
+        .expect("defaults mode should still accept overrides");
+
+        assert_eq!(config.logging.level, "verbose");
+        assert_eq!(config.server.port, 9999);
+        assert_eq!(config.storage.path, "/tmp/overhop-fallback");
     }
 }
