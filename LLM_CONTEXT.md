@@ -34,6 +34,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 13. Heartbeat is implemented in `src/heartbeat/mod.rs`:
    - Keep interval bounds strict (`100..=1000` ms, default `1000`).
    - Preserve stable initiation timestamp semantics for listener-side diff calculations.
+14. TCP server startup is implemented in `src/server/mod.rs`:
+   - Keep listener non-blocking.
+   - Keep host/port sourced from `AppConfig.server` (default `0.0.0.0:9876`).
 
 ## Intent
 
