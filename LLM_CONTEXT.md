@@ -27,6 +27,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 11. Module-level docs policy:
    - Create `README.md` inside each new logical module directory.
    - When a module changes meaningfully, update its module `README.md` in the same change so docs stay synchronized with code.
+12. Heartbeat is implemented in `src/heartbeat/mod.rs`:
+   - Keep interval bounds strict (`100..=1000` ms, default `1000`).
+   - Preserve stable initiation timestamp semantics for listener-side diff calculations.
 
 ## Intent
 
