@@ -74,6 +74,10 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - On first run, persist and preload `_system` queue.
    - Queue pool mutations must persist first, then reload in-memory pool from persistence.
    - On shutdown, queue state should be explicitly persisted/flushed before process exit.
+23. Runtime platform and startup cosmetics:
+   - Overhop runtime target is POSIX (`unix`) only.
+   - Startup must print the hardcoded decorative banner verbatim before subsystem initialization.
+   - Startup banner footer should include app/version/build-date metadata, short description, and MIT liability disclaimer text.
 
 ## Intent
 

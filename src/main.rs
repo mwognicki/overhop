@@ -26,6 +26,9 @@ use shutdown::ShutdownHooks;
 use wire::codec::WireCodec;
 
 fn main() {
+    ensure_posix_or_exit();
+    print_startup_banner();
+
     let app_config = load_config_or_exit();
     let log_level =
         LogLevel::from_config_value(&app_config.logging.level).unwrap_or_else(|| {
@@ -112,7 +115,6 @@ fn main() {
         Ok(())
     });
 
-    logger.info(Some("main"), "Starting Overhop");
     emitter.emit_or_exit("app.started", Some(json!({"component":"main"})));
 
     let mut heartbeat = Heartbeat::from_app_config(Arc::clone(&emitter), &app_config)
@@ -124,18 +126,6 @@ fn main() {
         Some(heartbeat.initial_metadata_payload()),
     );
     heartbeat.start().expect("heartbeat should start");
-
-    println!("{}", greeting());
-
-    logger.log(
-        LogLevel::Debug,
-        Some("main::greeting"),
-        "Rendered greeting",
-        Some(json!({
-            "message":"Overhop!",
-            "heartbeat_interval_ms": app_config.heartbeat.interval_ms
-        })),
-    );
 
     let shutdown_hooks = ShutdownHooks::install().unwrap_or_else(|error| {
         eprintln!("failed to install shutdown hooks: {error}");
@@ -216,16 +206,49 @@ fn load_config_or_exit() -> AppConfig {
     }
 }
 
-fn greeting() -> &'static str {
-    "Overhop!"
+fn ensure_posix_or_exit() {
+    if !cfg!(unix) {
+        eprintln!("unsupported platform: Overhop is intended for POSIX systems");
+        process::exit(2);
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::greeting;
+fn print_startup_banner() {
+    const RESET: &str = "\x1b[0m";
+    const BANNER_COLOR: &str = "\x1b[38;5;66m";
+    const DIM_GRAY: &str = "\x1b[2;90m";
+    const BANNER: &str = r#"
+                                         █████                         ███
+                                        ░░███                         ░███
+  ██████  █████ █████  ██████  ████████  ░███████    ██████  ████████ ░███
+ ███░░███░░███ ░░███  ███░░███░░███░░███ ░███░░███  ███░░███░░███░░███░███
+░███ ░███ ░███  ░███ ░███████  ░███ ░░░  ░███ ░███ ░███ ░███ ░███ ░███░███
+░███ ░███ ░░███ ███  ░███░░░   ░███      ░███ ░███ ░███ ░███ ░███ ░███░░░
+░░██████   ░░█████   ░░██████  █████     ████ █████░░██████  ░███████  ███
+ ░░░░░░     ░░░░░     ░░░░░░  ░░░░░     ░░░░ ░░░░░  ░░░░░░   ░███░░░  ░░░
+                                                             ░███
+                                                             █████
+                                                            ░░░░░         "#;
+    const APP_DESCRIPTION: &str =
+        "Persistent queue orchestration and worker coordination runtime over TCP.";
+    const REPO_URL: &str = "https://github.com/mwognicki/overhop";
+    const COPYRIGHT_NOTICE: &str = "Copyright (c) 2026 Marek Kapusta-Ognicki";
+    const LIABILITY_NOTICE: &str =
+        "MIT License disclaimer: software is provided \"AS IS\", without warranty or liability.";
 
-    #[test]
-    fn greeting_is_stable() {
-        assert_eq!(greeting(), "Overhop!");
-    }
+    println!("{BANNER_COLOR}");
+    println!("{BANNER}{RESET}");
+    println!(
+        "{} v{} | build {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        env!("OVERHOP_BUILD_DATE_UTC")
+    );
+    println!("{APP_DESCRIPTION}");
+    println!("Repository: {REPO_URL}");
+    println!("{DIM_GRAY}{COPYRIGHT_NOTICE}{RESET}");
+    println!("{DIM_GRAY}{LIABILITY_NOTICE}{RESET}");
+    println!();
+    println!("================================================================");
+    println!();
 }
