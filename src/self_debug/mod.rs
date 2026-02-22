@@ -1,12 +1,14 @@
 use std::fmt;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use rmpv::Value;
 
-use crate::logging::Logger;
+use crate::config::StorageConfig;
 use crate::wire::codec::{FRAME_HEADER_SIZE_BYTES, WireCodec};
 use crate::wire::envelope::{PayloadMap, WireEnvelope};
 use crate::wire::handshake::HELLO_MESSAGE_TYPE;
@@ -21,6 +23,7 @@ const COLOR_OUT: &str = "\x1b[38;5;81m";
 const COLOR_IN: &str = "\x1b[38;5;120m";
 const COLOR_ERROR: &str = "\x1b[38;5;196m";
 const COLOR_DIM: &str = "\x1b[2;90m";
+const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
 #[derive(Debug)]
@@ -35,6 +38,7 @@ pub enum SelfDebugError {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RuntimeFlags {
     pub enabled: bool,
+    pub keep_artifacts: bool,
 }
 
 impl fmt::Display for SelfDebugError {
@@ -64,6 +68,8 @@ pub fn extract_runtime_flags(args: Vec<String>) -> (RuntimeFlags, Vec<String>) {
     for arg in args {
         if arg == "--self-debug" {
             flags.enabled = true;
+        } else if arg == "--self-debug-keep-artifacts" {
+            flags.keep_artifacts = true;
         } else {
             config_args.push(arg);
         }
@@ -72,25 +78,27 @@ pub fn extract_runtime_flags(args: Vec<String>) -> (RuntimeFlags, Vec<String>) {
     (flags, config_args)
 }
 
-pub fn start_if_enabled(
-    flags: RuntimeFlags,
-    addr: SocketAddr,
-    codec: &WireCodec,
-    logger: Arc<Logger>,
-) {
-    if !flags.enabled {
-        return;
-    }
-
-    let self_debug_codec = codec.clone();
+pub fn spawn_runner(addr: SocketAddr, codec: WireCodec) -> Receiver<Result<(), SelfDebugError>> {
+    let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        if let Err(error) = run_self_debug(addr, self_debug_codec) {
-            logger.warn(
-                Some("self_debug"),
-                &format!("self-debug mode failed: {error}"),
-            );
-        }
+        let result = run_self_debug(addr, codec);
+        let _ = tx.send(result);
     });
+    rx
+}
+
+pub fn resolve_storage_path(storage: &StorageConfig) -> String {
+    match storage.self_debug_path.as_deref() {
+        Some(path) if !path.trim().is_empty() => path.to_owned(),
+        _ => format!("{}-self-debug", storage.path),
+    }
+}
+
+pub fn cleanup_artifacts(path: &Path) -> Result<(), SelfDebugError> {
+    if path.exists() {
+        fs::remove_dir_all(path)?;
+    }
+    Ok(())
 }
 
 pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebugError> {
@@ -265,7 +273,8 @@ fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>, SelfDebugError> {
 
 fn print_decoded(label: &str, envelope: &WireEnvelope, color: &str) {
     let json = envelope_to_json_line(envelope);
-    println!("{color}[{label}]{RESET} {json}");
+    let message_name = message_type_name(envelope.message_type);
+    println!("{color}[{label}] {BOLD}{message_name}{RESET} {json}");
 }
 
 fn envelope_to_json_line(envelope: &WireEnvelope) -> String {
@@ -333,4 +342,25 @@ fn require_string(payload: &PayloadMap, key: &'static str) -> Result<String, Sel
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or(SelfDebugError::MissingField(key))
+}
+
+fn message_type_name(message_type: i64) -> &'static str {
+    match message_type {
+        HELLO_MESSAGE_TYPE => "HELLO",
+        REGISTER_MESSAGE_TYPE => "REGISTER",
+        PING_MESSAGE_TYPE => "PING",
+        QUEUE_MESSAGE_TYPE => "QUEUE",
+        LSQUEUE_MESSAGE_TYPE => "LSQUEUE",
+        SUBSCRIBE_MESSAGE_TYPE => "SUBSCRIBE",
+        UNSUBSCRIBE_MESSAGE_TYPE => "UNSUBSCRIBE",
+        CREDIT_MESSAGE_TYPE => "CREDIT",
+        ADDQUEUE_MESSAGE_TYPE => "ADDQUEUE",
+        STATUS_MESSAGE_TYPE => "STATUS",
+        crate::wire::envelope::SERVER_OK_MESSAGE_TYPE => "OK",
+        crate::wire::envelope::SERVER_ERR_MESSAGE_TYPE => "ERR",
+        crate::wire::handshake::HI_MESSAGE_TYPE => "HI",
+        crate::wire::session::IDENT_MESSAGE_TYPE => "IDENT",
+        crate::wire::session::PONG_MESSAGE_TYPE => "PONG",
+        _ => "UNKNOWN",
+    }
 }

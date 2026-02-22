@@ -43,6 +43,7 @@ mod tests {
             storage: StorageConfig {
                 engine: "sled".to_owned(),
                 path: path.to_owned(),
+                self_debug_path: None,
                 sled: SledConfig::default(),
             },
         };

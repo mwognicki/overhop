@@ -61,6 +61,7 @@ impl Default for WireSessionConfig {
 pub struct StorageConfig {
     pub engine: String,
     pub path: String,
+    pub self_debug_path: Option<String>,
     #[serde(default)]
     pub sled: SledConfig,
 }
@@ -70,6 +71,7 @@ impl Default for StorageConfig {
         Self {
             engine: "sled".to_owned(),
             path: "~/.overhop/data".to_owned(),
+            self_debug_path: None,
             sled: SledConfig::default(),
         }
     }
