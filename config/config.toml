@@ -7,6 +7,9 @@
 #   --server.port 9999
 #   --server.tls_enabled false
 #   --wire.max_envelope_size_bytes 1048576
+#   --wire.session.unhelloed_max_lifetime_seconds 10
+#   --wire.session.helloed_unregistered_max_lifetime_seconds 10
+#   --wire.session.ident_register_timeout_seconds 2
 #   --storage.engine sled
 #   --storage.path ~/.overhop/data
 #   --storage.sled.cache_capacity 1073741824
@@ -36,6 +39,13 @@ tls_enabled = false
 # Allowed range: 65536..=33554432 (64 KiB..=32 MiB)
 # Default: 8388608 (8 MiB)
 max_envelope_size_bytes = 8388608
+[wire.session]
+# Maximum lifespan for anonymous connections that did not send HELLO yet
+unhelloed_max_lifetime_seconds = 10
+# Maximum lifespan for HELLOed but still unregistered anonymous connections
+helloed_unregistered_max_lifetime_seconds = 10
+# Allowed REGISTER timeout after IDENT challenge is sent
+ident_register_timeout_seconds = 2
 
 [storage]
 # Storage backend engine (currently hard-fixed to sled)

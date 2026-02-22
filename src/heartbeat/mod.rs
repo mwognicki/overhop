@@ -173,7 +173,7 @@ mod tests {
 
     use crate::config::{
         AppConfig, HeartbeatConfig as AppHeartbeatConfig, LoggingConfig,
-        ServerConfig as AppServerConfig, StorageConfig, WireConfig,
+        ServerConfig as AppServerConfig, StorageConfig, WireConfig, WireSessionConfig,
     };
     use crate::events::EventEmitter;
 
@@ -250,6 +250,7 @@ mod tests {
             },
             wire: WireConfig {
                 max_envelope_size_bytes: 8_388_608,
+                session: WireSessionConfig::default(),
             },
             storage: StorageConfig::default(),
         };

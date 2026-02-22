@@ -16,6 +16,7 @@ Provide transport-level wire protocol building blocks while keeping framing/seri
 - `envelope`: fixed wire envelope abstraction (`v/t/rid/p`) with unknown-field-tolerant parsing.
 - `handshake`: minimal HELLO/HI protocol agreement exchange.
 - `session`: anonymous session ordering + REGISTER flow validation/actions.
+  - includes IDENT challenge frame support for stale helloed/unregistered connections
 - `PROTOCOL.md`: implementation-tracking wire protocol draft/spec.
 
 ## Extension Direction

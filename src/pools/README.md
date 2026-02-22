@@ -15,6 +15,7 @@ Provide base in-memory pool abstractions for anonymous TCP connections and promo
 - `AnonymousConnectionsPool`
   - stores `connected_at`
   - stores optional `helloed_at`
+  - stores optional IDENT reply deadline timestamp for helloed-but-unregistered lifecycle enforcement
 - `WorkersPool`
   - immutable `worker_id` (UUID)
   - immutable `promoted_at`

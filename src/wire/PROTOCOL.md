@@ -97,11 +97,40 @@ This HELLO/HI exchange is a protocol agreement sanity check between nodes.
 - On failure:
   - server responds with generic `ERR` (`t=102`) and closes anonymous connection
 
+### IDENT (server -> client, anonymous challenge)
+
+- Message type: `t=104`
+- Request id: server push (`rid="0"`)
+- Payload:
+  - `register_timeout_seconds` (`int`)
+  - `reply_deadline` (`string`, RFC3339)
+
+IDENT is sent to HELLOed-but-unregistered anonymous connections once their
+`helloed_unregistered_max_lifetime_seconds` threshold is reached.
+
+Only allowed follow-up from client is `REGISTER`, and it must arrive before
+`reply_deadline`.
+
 ## Current Anonymous Message Order Constraints
 
 For a new TCP connection (while still anonymous):
 
 1. First client message must be `HELLO` (`t=1`).
 2. After `HELLO`, the only allowed client message is `REGISTER` (`t=2`).
+3. If IDENT is issued, `REGISTER` must be received before IDENT deadline.
 
 Any order violation is treated as protocol violation.
+
+## Heartbeat-Driven Connection Purge
+
+A heartbeat listener (effective cadence: once per 5 seconds) enforces:
+
+- unhelloed connection max age:
+  - controlled by `wire.session.unhelloed_max_lifetime_seconds` (default `10`)
+  - timed-out connections are terminated
+- helloed but unregistered connection max age:
+  - controlled by `wire.session.helloed_unregistered_max_lifetime_seconds` (default `10`)
+  - once exceeded, server sends IDENT challenge
+- IDENT register reply timeout:
+  - controlled by `wire.session.ident_register_timeout_seconds` (default `2`)
+  - missing deadline causes ERR + termination

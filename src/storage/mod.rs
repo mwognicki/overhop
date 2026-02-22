@@ -16,7 +16,7 @@ pub use sled_backend::SledStorage;
 mod tests {
     use crate::config::{
         AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig, SledConfig, StorageConfig,
-        WireConfig,
+        WireConfig, WireSessionConfig,
     };
     use crate::logging::LoggerConfig;
     use crate::orchestrator::queues::Queue;
@@ -38,6 +38,7 @@ mod tests {
             },
             wire: WireConfig {
                 max_envelope_size_bytes: 8_388_608,
+                session: WireSessionConfig::default(),
             },
             storage: StorageConfig {
                 engine: "sled".to_owned(),

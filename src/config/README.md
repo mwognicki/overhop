@@ -24,6 +24,9 @@ Provide a centralized application configuration facade that loads defaults from 
   - `tls_enabled` (currently must remain `false` until TLS transport is implemented)
 - `wire` section:
   - `max_envelope_size_bytes`
+  - `session.unhelloed_max_lifetime_seconds` (default `10`)
+  - `session.helloed_unregistered_max_lifetime_seconds` (default `10`)
+  - `session.ident_register_timeout_seconds` (default `2`)
 - `storage` section:
   - `engine` (currently `sled`)
   - `path` (default `~/.overhop/data`, supports `~/` and `$HOME/` prefixes)

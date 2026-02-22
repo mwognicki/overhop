@@ -70,6 +70,7 @@ pub struct AnonymousConnectionRecord {
     pub connection: Arc<PersistentConnection>,
     pub connected_at: DateTime<Utc>,
     pub helloed_at: Option<DateTime<Utc>>,
+    pub ident_reply_deadline_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug)]
@@ -77,6 +78,16 @@ pub struct AnonymousConnectionSnapshot {
     pub connection_id: u64,
     pub connected_at: DateTime<Utc>,
     pub helloed_at: Option<DateTime<Utc>>,
+    pub ident_reply_deadline_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone)]
+pub struct AnonymousConnectionMaintenance {
+    pub connection_id: u64,
+    pub connection: Arc<PersistentConnection>,
+    pub connected_at: DateTime<Utc>,
+    pub helloed_at: Option<DateTime<Utc>>,
+    pub ident_reply_deadline_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -131,6 +142,7 @@ impl AnonymousConnectionsPool {
             connection,
             connected_at: Utc::now(),
             helloed_at: None,
+            ident_reply_deadline_at: None,
         };
 
         self.records
@@ -159,6 +171,7 @@ impl AnonymousConnectionsPool {
                 connection_id: record.connection_id,
                 connected_at: record.connected_at,
                 helloed_at: record.helloed_at,
+                ident_reply_deadline_at: record.ident_reply_deadline_at,
             })
     }
 
@@ -190,13 +203,32 @@ impl AnonymousConnectionsPool {
             .len()
     }
 
-    pub fn active_connections(&self) -> Vec<(u64, Arc<PersistentConnection>)> {
+    pub fn maintenance_snapshot(&self) -> Vec<AnonymousConnectionMaintenance> {
         self.records
             .lock()
             .expect("anonymous pool lock poisoned")
-            .iter()
-            .map(|(id, record)| (*id, Arc::clone(&record.connection)))
+            .values()
+            .map(|record| AnonymousConnectionMaintenance {
+                connection_id: record.connection_id,
+                connection: Arc::clone(&record.connection),
+                connected_at: record.connected_at,
+                helloed_at: record.helloed_at,
+                ident_reply_deadline_at: record.ident_reply_deadline_at,
+            })
             .collect()
+    }
+
+    pub fn mark_ident_reply_deadline(
+        &self,
+        connection_id: u64,
+        deadline: DateTime<Utc>,
+    ) -> Result<(), PoolError> {
+        let mut records = self.records.lock().expect("anonymous pool lock poisoned");
+        let record = records
+            .get_mut(&connection_id)
+            .ok_or(PoolError::AnonymousConnectionNotFound { connection_id })?;
+        record.ident_reply_deadline_at = Some(deadline);
+        Ok(())
     }
 }
 

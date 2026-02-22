@@ -10,13 +10,14 @@ mod shutdown;
 mod wire;
 
 use std::process;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{io, thread};
 
+use chrono::{DateTime, Utc};
 use config::AppConfig;
 use events::EventEmitter;
-use heartbeat::Heartbeat;
+use heartbeat::{HEARTBEAT_EVENT, Heartbeat};
 use logging::{LogLevel, Logger, LoggerConfig};
 use orchestrator::queues::persistent::PersistentQueuePool;
 use pools::ConnectionWorkerPools;
@@ -27,8 +28,8 @@ use shutdown::ShutdownHooks;
 use wire::codec::WireCodec;
 use wire::envelope::{PayloadMap, WireEnvelope};
 use wire::session::{
-    AnonymousProtocolAction, PROTOCOL_VIOLATION_CODE, build_protocol_error_frame,
-    evaluate_anonymous_client_frame,
+    AnonymousProtocolAction, CONNECTION_TIMEOUT_CODE, REGISTER_TIMEOUT_CODE,
+    build_ident_frame, build_protocol_error_frame, evaluate_anonymous_client_frame,
 };
 
 fn main() {
@@ -45,16 +46,16 @@ fn main() {
             process::exit(2);
         });
 
-    let logger = Logger::new(LoggerConfig {
+    let logger = Arc::new(Logger::new(LoggerConfig {
         min_level: log_level,
         human_friendly: app_config.logging.human_friendly,
-    });
-    let storage = StorageFacade::initialize(&app_config, &logger).unwrap_or_else(|error| {
+    }));
+    let storage = StorageFacade::initialize(&app_config, logger.as_ref()).unwrap_or_else(|error| {
         eprintln!("storage initialization error: {error}");
         process::exit(2);
     });
     let persistent_queues =
-        PersistentQueuePool::bootstrap(&storage, &logger).unwrap_or_else(|error| {
+        PersistentQueuePool::bootstrap(&storage, logger.as_ref()).unwrap_or_else(|error| {
             eprintln!("queue bootstrap error: {error}");
             process::exit(2);
         });
@@ -96,10 +97,10 @@ fn main() {
             "TLS is disabled for now; TCP connections are plain and persistent full-duplex",
         );
     }
-    let wire_codec = WireCodec::from_app_config(&app_config).unwrap_or_else(|error| {
+    let wire_codec = Arc::new(WireCodec::from_app_config(&app_config).unwrap_or_else(|error| {
         eprintln!("wire codec configuration error: {error}");
         process::exit(2);
-    });
+    }));
     logger.log(
         LogLevel::Info,
         Some("main::wire"),
@@ -110,7 +111,18 @@ fn main() {
     );
 
     let emitter = Arc::new(EventEmitter::new());
-    let pools = ConnectionWorkerPools::new();
+    let pools = Arc::new(ConnectionWorkerPools::new());
+    let timeout_policy = AnonymousTimeoutPolicy {
+        unhelloed_max_lifetime_seconds: app_config
+            .wire
+            .session
+            .unhelloed_max_lifetime_seconds,
+        helloed_unregistered_max_lifetime_seconds: app_config
+            .wire
+            .session
+            .helloed_unregistered_max_lifetime_seconds,
+        ident_register_timeout_seconds: app_config.wire.session.ident_register_timeout_seconds,
+    };
 
     emitter.on("app.started", |event| {
         println!("sync event observed: {}", event.name);
@@ -118,6 +130,30 @@ fn main() {
     });
     emitter.on_async("app.started", |event| {
         eprintln!("async event observed: {}", event.name);
+        Ok(())
+    });
+    let pools_for_maintenance = Arc::clone(&pools);
+    let wire_codec_for_maintenance = Arc::clone(&wire_codec);
+    let logger_for_maintenance = Arc::clone(&logger);
+    let heartbeat_maintenance_last_run = Arc::new(Mutex::new(None::<DateTime<Utc>>));
+    let heartbeat_maintenance_last_run_for_listener = Arc::clone(&heartbeat_maintenance_last_run);
+    emitter.on(HEARTBEAT_EVENT, move |_| {
+        let now = Utc::now();
+        let mut guard = heartbeat_maintenance_last_run_for_listener
+            .lock()
+            .map_err(|_| "heartbeat maintenance lock poisoned".to_owned())?;
+        if let Some(last_run) = *guard {
+            if (now - last_run).num_seconds() < 5 {
+                return Ok(());
+            }
+        }
+        *guard = Some(now);
+        purge_stale_anonymous_connections(
+            pools_for_maintenance.as_ref(),
+            wire_codec_for_maintenance.as_ref(),
+            logger_for_maintenance.as_ref(),
+            timeout_policy,
+        );
         Ok(())
     });
 
@@ -162,11 +198,17 @@ fn main() {
                     "peer_addr": connection.peer_addr().to_string(),
                     "connected_at": anon_metadata.connected_at.to_rfc3339(),
                     "helloed_at": anon_metadata.helloed_at.map(|v| v.to_rfc3339()),
+                    "ident_reply_deadline_at": anon_metadata.ident_reply_deadline_at.map(|v| v.to_rfc3339()),
                     "tls_enabled": app_config.server.tls_enabled
                 })),
             );
         }
-        process_anonymous_hello_handshakes(&pools, &wire_codec, &logger);
+        process_anonymous_client_messages(
+            pools.as_ref(),
+            wire_codec.as_ref(),
+            logger.as_ref(),
+            timeout_policy.ident_register_timeout_seconds,
+        );
         thread::sleep(Duration::from_millis(100));
     }
 
@@ -260,25 +302,32 @@ fn print_startup_banner() {
     println!();
 }
 
-fn process_anonymous_hello_handshakes(
+#[derive(Clone, Copy)]
+struct AnonymousTimeoutPolicy {
+    unhelloed_max_lifetime_seconds: u64,
+    helloed_unregistered_max_lifetime_seconds: u64,
+    ident_register_timeout_seconds: u64,
+}
+
+fn process_anonymous_client_messages(
     pools: &ConnectionWorkerPools,
     wire_codec: &WireCodec,
     logger: &Logger,
+    _ident_register_timeout_seconds: u64,
 ) {
     let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
-    let active_connections = pools.anonymous.active_connections();
+    let active_connections = pools.anonymous.maintenance_snapshot();
 
-    for (connection_id, connection) in active_connections {
+    for connection_metadata in active_connections {
+        let connection_id = connection_metadata.connection_id;
+        let connection = connection_metadata.connection;
+        let helloed = connection_metadata.helloed_at.is_some();
+        let ident_reply_deadline_at = connection_metadata.ident_reply_deadline_at;
         let mut read_buffer = vec![0_u8; read_buffer_len];
         match connection.try_read(&mut read_buffer) {
             Ok(0) => {}
             Ok(size) => {
                 let frame = &read_buffer[..size];
-                let helloed = pools
-                    .anonymous
-                    .snapshot(connection_id)
-                    .map(|snapshot| snapshot.helloed_at.is_some())
-                    .unwrap_or(false);
 
                 match evaluate_anonymous_client_frame(wire_codec, frame, helloed) {
                     Ok(AnonymousProtocolAction::HelloAccepted { response_frame }) => {
@@ -306,6 +355,22 @@ fn process_anonymous_hello_handshakes(
                         );
                     }
                     Ok(AnonymousProtocolAction::RegisterRequested { request_id }) => {
+                        if let Some(deadline) = ident_reply_deadline_at {
+                            if Utc::now() > deadline {
+                                send_protocol_error_and_close(
+                                    pools,
+                                    wire_codec,
+                                    logger,
+                                    connection_id,
+                                    &connection,
+                                    &request_id,
+                                    REGISTER_TIMEOUT_CODE,
+                                    "REGISTER timeout after IDENT challenge",
+                                );
+                                continue;
+                            }
+                        }
+
                         let worker_id = match pools
                             .promote_anonymous_to_worker(connection_id, pools::WorkerMetadata::default())
                         {
@@ -344,7 +409,7 @@ fn process_anonymous_hello_handshakes(
                         write_response_frame(
                             &connection,
                             &ok_frame,
-                            connection.id(),
+                            connection_id,
                             logger,
                             "REGISTER OK response",
                         );
@@ -361,34 +426,15 @@ fn process_anonymous_hello_handshakes(
                         message,
                     }) => {
                         let rid = request_id.as_deref().unwrap_or("0");
-                        match build_protocol_error_frame(wire_codec, rid, &code, &message) {
-                            Ok(error_frame) => {
-                                write_response_frame(
-                                    &connection,
-                                    &error_frame,
-                                    connection_id,
-                                    logger,
-                                    "ERR response",
-                                );
-                            }
-                            Err(build_error) => {
-                                logger.warn(
-                                    Some("main::wire"),
-                                    &format!(
-                                        "failed to build protocol ERR response for connection {connection_id}: {build_error}"
-                                    ),
-                                );
-                            }
-                        }
-                        logger.warn(
-                            Some("main::wire"),
-                            &format!(
-                                "protocol violation on anonymous connection {connection_id}: {message}; closing connection"
-                            ),
-                        );
-                        let _ = pools.terminate_anonymous(
+                        send_protocol_error_and_close(
+                            pools,
+                            wire_codec,
+                            logger,
                             connection_id,
-                            Some(format!("wire protocol violation ({PROTOCOL_VIOLATION_CODE}): {message}")),
+                            &connection,
+                            rid,
+                            &code,
+                            &message,
                         );
                     }
                     Err(error) => {
@@ -428,9 +474,9 @@ fn write_response_frame(
     connection_id: u64,
     logger: &Logger,
     label: &str,
-) {
+) -> bool {
     match connection.try_write(response_frame) {
-        Ok(written) if written == response_frame.len() => {}
+        Ok(written) if written == response_frame.len() => true,
         Ok(written) => {
             logger.warn(
                 Some("main::wire"),
@@ -439,6 +485,7 @@ fn write_response_frame(
                     response_frame.len()
                 ),
             );
+            false
         }
         Err(error) => {
             logger.warn(
@@ -447,6 +494,142 @@ fn write_response_frame(
                     "failed to write {label} to connection {connection_id}: {error}"
                 ),
             );
+            false
+        }
+    }
+}
+
+fn send_protocol_error_and_close(
+    pools: &ConnectionWorkerPools,
+    wire_codec: &WireCodec,
+    logger: &Logger,
+    connection_id: u64,
+    connection: &Arc<server::PersistentConnection>,
+    request_id: &str,
+    code: &str,
+    message: &str,
+) {
+    match build_protocol_error_frame(wire_codec, request_id, code, message) {
+        Ok(error_frame) => {
+            write_response_frame(connection, &error_frame, connection_id, logger, "ERR response");
+        }
+        Err(build_error) => {
+            logger.warn(
+                Some("main::wire"),
+                &format!(
+                    "failed to build protocol ERR response for connection {connection_id}: {build_error}"
+                ),
+            );
+        }
+    }
+
+    logger.warn(
+        Some("main::wire"),
+        &format!(
+            "protocol error on anonymous connection {connection_id} ({code}): {message}; closing connection"
+        ),
+    );
+    let _ = pools.terminate_anonymous(
+        connection_id,
+        Some(format!("wire protocol error ({code}): {message}")),
+    );
+}
+
+fn purge_stale_anonymous_connections(
+    pools: &ConnectionWorkerPools,
+    wire_codec: &WireCodec,
+    logger: &Logger,
+    timeout_policy: AnonymousTimeoutPolicy,
+) {
+    let now = Utc::now();
+    for metadata in pools.anonymous.maintenance_snapshot() {
+        if metadata.helloed_at.is_none() {
+            let elapsed = (now - metadata.connected_at).num_seconds();
+            if elapsed >= timeout_policy.unhelloed_max_lifetime_seconds as i64 {
+                logger.info(
+                    Some("main::wire"),
+                    &format!(
+                        "terminating unhelloed anonymous connection {} after {} seconds",
+                        metadata.connection_id, elapsed
+                    ),
+                );
+                let _ = pools.terminate_anonymous(
+                    metadata.connection_id,
+                    Some("unhelloed connection timeout".to_owned()),
+                );
+            }
+            continue;
+        }
+
+        let helloed_at = metadata.helloed_at.expect("checked above");
+        let helloed_elapsed = (now - helloed_at).num_seconds();
+        if helloed_elapsed < timeout_policy.helloed_unregistered_max_lifetime_seconds as i64 {
+            continue;
+        }
+
+        if let Some(deadline) = metadata.ident_reply_deadline_at {
+            if now >= deadline {
+                send_protocol_error_and_close(
+                    pools,
+                    wire_codec,
+                    logger,
+                    metadata.connection_id,
+                    &metadata.connection,
+                    "0",
+                    CONNECTION_TIMEOUT_CODE,
+                    "IDENT timeout expired without REGISTER",
+                );
+            }
+            continue;
+        }
+
+        let reply_deadline = now
+            + chrono::Duration::seconds(timeout_policy.ident_register_timeout_seconds as i64);
+        let ident_frame = match build_ident_frame(
+            wire_codec,
+            timeout_policy.ident_register_timeout_seconds,
+            &reply_deadline.to_rfc3339(),
+        ) {
+            Ok(frame) => frame,
+            Err(error) => {
+                logger.warn(
+                    Some("main::wire"),
+                    &format!(
+                        "failed to build IDENT frame for connection {}: {}",
+                        metadata.connection_id, error
+                    ),
+                );
+                continue;
+            }
+        };
+
+        if write_response_frame(
+            &metadata.connection,
+            &ident_frame,
+            metadata.connection_id,
+            logger,
+            "IDENT response",
+        ) {
+            if let Err(error) = pools
+                .anonymous
+                .mark_ident_reply_deadline(metadata.connection_id, reply_deadline)
+            {
+                logger.warn(
+                    Some("main::wire"),
+                    &format!(
+                        "failed to mark IDENT reply deadline for connection {}: {}",
+                        metadata.connection_id, error
+                    ),
+                );
+            } else {
+                logger.info(
+                    Some("main::wire"),
+                    &format!(
+                        "IDENT challenge sent to anonymous connection {} with {}s timeout",
+                        metadata.connection_id, timeout_policy.ident_register_timeout_seconds
+                    ),
+                );
+            }
         }
     }
 }

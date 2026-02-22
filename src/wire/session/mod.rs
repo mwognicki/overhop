@@ -5,7 +5,10 @@ use crate::wire::envelope::{EnvelopeError, WireEnvelope};
 use crate::wire::handshake::{process_client_handshake_frame, HELLO_MESSAGE_TYPE};
 
 pub const REGISTER_MESSAGE_TYPE: i64 = 2;
+pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
+pub const REGISTER_TIMEOUT_CODE: &str = "REGISTER_TIMEOUT";
+pub const CONNECTION_TIMEOUT_CODE: &str = "CONNECTION_TIMEOUT";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AnonymousProtocolAction {
@@ -117,6 +120,33 @@ pub fn build_protocol_error_frame(
         .map_err(SessionError::Codec)
 }
 
+pub fn build_ident_frame(
+    codec: &WireCodec,
+    register_timeout_seconds: u64,
+    reply_deadline_rfc3339: &str,
+) -> Result<Vec<u8>, SessionError> {
+    let mut payload = crate::wire::envelope::PayloadMap::new();
+    payload.insert(
+        "register_timeout_seconds".to_owned(),
+        rmpv::Value::Integer((register_timeout_seconds as i64).into()),
+    );
+    payload.insert(
+        "reply_deadline".to_owned(),
+        rmpv::Value::String(reply_deadline_rfc3339.into()),
+    );
+
+    codec
+        .encode_frame(
+            &WireEnvelope::new(
+                IDENT_MESSAGE_TYPE,
+                crate::wire::envelope::SERVER_PUSH_REQUEST_ID,
+                payload,
+            )
+            .into_raw(),
+        )
+        .map_err(SessionError::Codec)
+}
+
 fn to_protocol_if_handshake_error(
     source: crate::wire::handshake::HandshakeError,
 ) -> SessionError {
@@ -132,8 +162,9 @@ mod tests {
     use crate::wire::envelope::PayloadMap;
 
     use super::{
-        AnonymousProtocolAction, PROTOCOL_VIOLATION_CODE, REGISTER_MESSAGE_TYPE,
-        build_protocol_error_frame, evaluate_anonymous_client_frame,
+        AnonymousProtocolAction, IDENT_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE,
+        REGISTER_MESSAGE_TYPE, build_ident_frame, build_protocol_error_frame,
+        evaluate_anonymous_client_frame,
     };
 
     #[test]
@@ -233,6 +264,26 @@ mod tests {
         assert_eq!(
             envelope.payload.get("code"),
             Some(&rmpv::Value::String(PROTOCOL_VIOLATION_CODE.into()))
+        );
+    }
+
+    #[test]
+    fn can_build_ident_frame_with_deadline_payload() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let frame = build_ident_frame(&codec, 2, "2026-02-22T12:00:00.000Z")
+            .expect("ident frame should build");
+
+        let decoded = codec.decode_frame(&frame).expect("frame should decode");
+        let envelope =
+            crate::wire::envelope::WireEnvelope::from_raw(&decoded).expect("envelope parse");
+        assert_eq!(envelope.message_type, IDENT_MESSAGE_TYPE);
+        assert_eq!(
+            envelope.payload.get("register_timeout_seconds"),
+            Some(&rmpv::Value::Integer(2_i64.into()))
+        );
+        assert_eq!(
+            envelope.payload.get("reply_deadline"),
+            Some(&rmpv::Value::String("2026-02-22T12:00:00.000Z".into()))
         );
     }
 }

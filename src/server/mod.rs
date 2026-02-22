@@ -236,7 +236,7 @@ mod tests {
 
     use crate::config::{
         AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig as AppServerConfig, StorageConfig,
-        WireConfig,
+        WireConfig, WireSessionConfig,
     };
 
     use super::{
@@ -336,6 +336,7 @@ mod tests {
             },
             wire: WireConfig {
                 max_envelope_size_bytes: 8_388_608,
+                session: WireSessionConfig::default(),
             },
             storage: StorageConfig::default(),
         };
