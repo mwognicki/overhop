@@ -13,6 +13,7 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Supports worker-side PING request validation and PONG response frame construction.
 - Supports worker queue query requests (`GQUEUE`, `LQUEUES`) parsing/validation.
 - Supports worker subscription flow requests (`SUBSCRIBE`, `UNSUBSCRIBE`) parsing/validation.
+- Supports worker credit increment request (`CREDIT`) parsing/validation.
 
 ## Most Relevant Features
 
@@ -25,4 +26,5 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Worker `LQUEUES` payload must be empty and returns full queue list metadata.
 - Worker `SUBSCRIBE` payload must include queue name under `q`, with optional non-negative `credits`.
 - Worker `UNSUBSCRIBE` payload must include `sid` as UUID string.
+- Worker `CREDIT` payload must include `sid` (UUID string) and positive `credits` amount.
 - Exposes action-oriented result so runtime can apply pool transitions (e.g., anonymous -> worker promotion).
