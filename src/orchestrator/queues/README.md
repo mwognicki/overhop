@@ -1,0 +1,34 @@
+# Orchestrator Queues Module (`src/orchestrator/queues`)
+
+## Core Objective
+
+Provide foundational queue registry abstractions for queue orchestration with unique naming, queue-level defaults, and lifecycle state.
+
+## Core Ideas
+
+- Queue is an autonomous serializable struct.
+- Queue pool enforces unique queue names.
+- Queue state (active/paused) is persisted and recoverable.
+- Bootstrapping completion is explicitly marked by external orchestrator logic.
+
+## Core Concepts
+
+- `Queue`
+  - `name` (unique string)
+  - `config`
+    - `concurrency_limit` (optional)
+    - `allow_job_overrides` (default `true`)
+  - `state` (`active` / `paused`)
+- `QueuePool`
+  - queue registration, lookup, listing
+  - pause/resume controls
+  - JSON snapshot serialization/deserialization
+  - reconstruction from stored queues
+  - explicit `mark_bootstrapped()` state
+
+## Most Relevant Features
+
+- Unique queue registration guard.
+- Serializable queue and pool snapshot structures for storage compatibility.
+- Pause/resume state persistence through JSON snapshots.
+- Headless reconstruction helper for storage-driven bootstrapping flows.
