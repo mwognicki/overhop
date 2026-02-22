@@ -5,6 +5,7 @@ mod heartbeat;
 mod logging;
 mod orchestrator;
 mod pools;
+mod self_debug;
 mod server;
 mod storage;
 mod shutdown;
@@ -41,7 +42,9 @@ fn main() {
     print_startup_banner();
     let app_started_at = Utc::now();
 
-    let app_config = load_config_or_exit();
+    let runtime_args = std::env::args().skip(1).collect::<Vec<_>>();
+    let (runtime_flags, config_args) = self_debug::extract_runtime_flags(runtime_args);
+    let app_config = load_config_or_exit(config_args);
     let log_level =
         LogLevel::from_config_value(&app_config.logging.level).unwrap_or_else(|| {
             eprintln!(
@@ -184,6 +187,8 @@ fn main() {
         "Shutdown hooks installed for SIGINT/SIGTERM",
     );
 
+    self_debug::start_if_enabled(runtime_flags, bound_addr, wire_codec.as_ref(), Arc::clone(&logger));
+
     while !shutdown_hooks.is_triggered() {
         if let Some(connection) = server.try_accept_persistent().unwrap_or_else(|error| {
             eprintln!("server accept error: {error}");
@@ -258,8 +263,8 @@ fn main() {
     );
 }
 
-fn load_config_or_exit() -> AppConfig {
-    match AppConfig::load_with_discovery(std::env::args().skip(1)) {
+fn load_config_or_exit(args: Vec<String>) -> AppConfig {
+    match AppConfig::load_with_discovery(args) {
         Ok(config) => config,
         Err(error) => {
             eprintln!("configuration error: {error}");
