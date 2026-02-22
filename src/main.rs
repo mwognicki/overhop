@@ -53,9 +53,16 @@ fn main() {
         Some(json!({
             "bind_address": bound_addr.to_string(),
             "host": app_config.server.host,
-            "port": app_config.server.port
+            "port": app_config.server.port,
+            "tls_enabled": app_config.server.tls_enabled
         })),
     );
+    if !app_config.server.tls_enabled {
+        logger.info(
+            Some("main::server"),
+            "TLS is disabled for now; TCP connections are plain and persistent full-duplex",
+        );
+    }
     let wire_codec = WireCodec::from_app_config(&app_config).unwrap_or_else(|error| {
         eprintln!("wire codec configuration error: {error}");
         process::exit(2);
@@ -115,6 +122,21 @@ fn main() {
     );
 
     while !shutdown_hooks.is_triggered() {
+        if let Some(connection) = server.try_accept_persistent().unwrap_or_else(|error| {
+            eprintln!("server accept error: {error}");
+            process::exit(2);
+        }) {
+            logger.log(
+                LogLevel::Info,
+                Some("main::server"),
+                "Accepted persistent full-duplex TCP connection",
+                Some(json!({
+                    "connection_id": connection.id(),
+                    "peer_addr": connection.peer_addr().to_string(),
+                    "tls_enabled": app_config.server.tls_enabled
+                })),
+            );
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
 
@@ -124,6 +146,7 @@ fn main() {
     );
     emitter.begin_shutdown();
     heartbeat.stop().expect("heartbeat should stop");
+    server.shutdown_all_connections();
 
     let drained = emitter.wait_for_idle(Duration::from_secs(3));
     if drained {

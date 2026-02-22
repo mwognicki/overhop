@@ -5,6 +5,7 @@
 #   --heartbeat.interval_ms 250
 #   --server.host 127.0.0.1
 #   --server.port 9999
+#   --server.tls_enabled false
 #   --wire.max_envelope_size_bytes 1048576
 
 [logging]
@@ -23,6 +24,8 @@ interval_ms = 1000
 host = "0.0.0.0"
 # TCP bind port
 port = 9876
+# TLS transport flag (currently must remain false until TLS support lands)
+tls_enabled = false
 
 [wire]
 # Maximum MessagePack envelope payload size in bytes.

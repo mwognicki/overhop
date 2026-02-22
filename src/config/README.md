@@ -21,6 +21,7 @@ Provide a centralized application configuration facade that loads defaults from 
 - `server` section:
   - `host`
   - `port`
+  - `tls_enabled` (currently must remain `false` until TLS transport is implemented)
 - `wire` section:
   - `max_envelope_size_bytes`
 - `load_from_toml_with_args(path, args)`: loads TOML, applies argv overrides, deserializes config.
