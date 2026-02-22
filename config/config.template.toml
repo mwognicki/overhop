@@ -1,0 +1,13 @@
+# Overhop configuration template
+# Copy this file to `config/config.toml` and adjust values.
+# Every key may be overridden through argv with dotted notation.
+
+[logging]
+# error | warn | info | debug | verbose
+level = "debug"
+# Enables colorful/human-friendly formatting
+human_friendly = false
+
+[heartbeat]
+# Milliseconds, inclusive range: 100..=1000
+interval_ms = 1000

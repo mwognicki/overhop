@@ -18,6 +18,7 @@ Provide a lightweight heartbeat service that emits regular `on-heartbeat` events
   - default `1000`
 - `Heartbeat`:
   - public immutable initiation timestamp: `initiated_at`
+  - `from_app_config(...)` binds heartbeat setup directly to `AppConfig`
   - `start()` launches periodic emitter loop
   - `stop()` shuts down worker loop
 - `initial_metadata_payload()`: JSON metadata useful for startup logging

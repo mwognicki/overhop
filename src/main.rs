@@ -1,17 +1,33 @@
+mod config;
 mod events;
 mod heartbeat;
 mod logging;
 
+use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 
+use config::AppConfig;
 use events::EventEmitter;
-use heartbeat::{Heartbeat, HeartbeatConfig};
+use heartbeat::Heartbeat;
 use logging::{LogLevel, Logger, LoggerConfig};
 use serde_json::json;
 
 fn main() {
-    let logger = Logger::new(LoggerConfig::default());
+    let app_config = load_config_or_exit();
+    let log_level =
+        LogLevel::from_config_value(&app_config.logging.level).unwrap_or_else(|| {
+            eprintln!(
+                "invalid logging.level '{}'. Allowed values: error, warn, info, debug, verbose",
+                app_config.logging.level
+            );
+            process::exit(2);
+        });
+
+    let logger = Logger::new(LoggerConfig {
+        min_level: log_level,
+        human_friendly: app_config.logging.human_friendly,
+    });
     let emitter = Arc::new(EventEmitter::new());
 
     emitter.on("app.started", |event| {
@@ -26,7 +42,7 @@ fn main() {
     logger.info(Some("main"), "Starting Overhop");
     emitter.emit_or_exit("app.started", Some(json!({"component":"main"})));
 
-    let mut heartbeat = Heartbeat::new(Arc::clone(&emitter), HeartbeatConfig::default())
+    let mut heartbeat = Heartbeat::from_app_config(Arc::clone(&emitter), &app_config)
         .expect("heartbeat configuration should be valid");
     logger.log(
         LogLevel::Info,
@@ -44,8 +60,21 @@ fn main() {
         LogLevel::Debug,
         Some("main::greeting"),
         "Rendered greeting",
-        Some(json!({"message":"Overhop!"})),
+        Some(json!({
+            "message":"Overhop!",
+            "heartbeat_interval_ms": app_config.heartbeat.interval_ms
+        })),
     );
+}
+
+fn load_config_or_exit() -> AppConfig {
+    match AppConfig::load_with_discovery(std::env::args().skip(1)) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            process::exit(2);
+        }
+    }
 }
 
 fn greeting() -> &'static str {
