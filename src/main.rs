@@ -135,6 +135,7 @@ fn main() {
     let pools_for_maintenance = Arc::clone(&pools);
     let wire_codec_for_maintenance = Arc::clone(&wire_codec);
     let logger_for_maintenance = Arc::clone(&logger);
+    let maintenance_interval_seconds = timeout_policy.maintenance_interval_seconds();
     let heartbeat_maintenance_last_run = Arc::new(Mutex::new(None::<DateTime<Utc>>));
     let heartbeat_maintenance_last_run_for_listener = Arc::clone(&heartbeat_maintenance_last_run);
     emitter.on(HEARTBEAT_EVENT, move |_| {
@@ -143,7 +144,7 @@ fn main() {
             .lock()
             .map_err(|_| "heartbeat maintenance lock poisoned".to_owned())?;
         if let Some(last_run) = *guard {
-            if (now - last_run).num_seconds() < 5 {
+            if (now - last_run).num_seconds() < maintenance_interval_seconds as i64 {
                 return Ok(());
             }
         }
@@ -207,7 +208,6 @@ fn main() {
             pools.as_ref(),
             wire_codec.as_ref(),
             logger.as_ref(),
-            timeout_policy.ident_register_timeout_seconds,
         );
         thread::sleep(Duration::from_millis(100));
     }
@@ -309,11 +309,18 @@ struct AnonymousTimeoutPolicy {
     ident_register_timeout_seconds: u64,
 }
 
+impl AnonymousTimeoutPolicy {
+    fn maintenance_interval_seconds(self) -> u64 {
+        self.unhelloed_max_lifetime_seconds
+            .min(self.helloed_unregistered_max_lifetime_seconds)
+            .min(self.ident_register_timeout_seconds)
+    }
+}
+
 fn process_anonymous_client_messages(
     pools: &ConnectionWorkerPools,
     wire_codec: &WireCodec,
     logger: &Logger,
-    _ident_register_timeout_seconds: u64,
 ) {
     let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
     let active_connections = pools.anonymous.maintenance_snapshot();

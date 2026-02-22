@@ -123,7 +123,14 @@ Any order violation is treated as protocol violation.
 
 ## Heartbeat-Driven Connection Purge
 
-A heartbeat listener (effective cadence: once per 5 seconds) enforces:
+A heartbeat listener enforces anonymous lifecycle with effective cadence equal
+to the minimum of:
+
+- `wire.session.unhelloed_max_lifetime_seconds`
+- `wire.session.helloed_unregistered_max_lifetime_seconds`
+- `wire.session.ident_register_timeout_seconds`
+
+With current defaults, this cadence is 2 seconds.
 
 - unhelloed connection max age:
   - controlled by `wire.session.unhelloed_max_lifetime_seconds` (default `10`)
