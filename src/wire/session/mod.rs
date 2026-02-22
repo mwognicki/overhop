@@ -6,6 +6,8 @@ use crate::wire::handshake::{process_client_handshake_frame, HELLO_MESSAGE_TYPE}
 
 pub const REGISTER_MESSAGE_TYPE: i64 = 2;
 pub const PING_MESSAGE_TYPE: i64 = 3;
+pub const GQUEUE_MESSAGE_TYPE: i64 = 4;
+pub const LQUEUES_MESSAGE_TYPE: i64 = 5;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -21,6 +23,8 @@ pub enum AnonymousProtocolAction {
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorkerProtocolAction {
     PingRequested { request_id: String },
+    GetQueueRequested { request_id: String, queue_name: String },
+    ListQueuesRequested { request_id: String },
 }
 
 #[derive(Debug)]
@@ -119,10 +123,42 @@ pub fn evaluate_worker_client_frame(
         .map_err(SessionError::Envelope)?;
 
     if envelope.message_type != PING_MESSAGE_TYPE {
+        if envelope.message_type == GQUEUE_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("q")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "GQUEUE payload must contain string key 'q'".to_owned(),
+                })?;
+            return Ok(WorkerProtocolAction::GetQueueRequested {
+                request_id: envelope.request_id,
+                queue_name,
+            });
+        }
+
+        if envelope.message_type == LQUEUES_MESSAGE_TYPE {
+            if !envelope.payload.is_empty() {
+                return Err(SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "LQUEUES payload must be an empty map".to_owned(),
+                });
+            }
+
+            return Ok(WorkerProtocolAction::ListQueuesRequested {
+                request_id: envelope.request_id,
+            });
+        }
+
         return Err(SessionError::ProtocolViolation {
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
-            message: "registered workers can currently send only PING".to_owned(),
+            message: "registered workers can currently send only PING, GQUEUE, or LQUEUES"
+                .to_owned(),
         });
     }
 
@@ -218,7 +254,8 @@ mod tests {
     use crate::wire::envelope::PayloadMap;
 
     use super::{
-        AnonymousProtocolAction, IDENT_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE,
+        AnonymousProtocolAction, GQUEUE_MESSAGE_TYPE, IDENT_MESSAGE_TYPE, LQUEUES_MESSAGE_TYPE,
+        PROTOCOL_VIOLATION_CODE,
         PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, WorkerProtocolAction,
         build_ident_frame, build_pong_frame, build_protocol_error_frame,
         evaluate_anonymous_client_frame, evaluate_worker_client_frame,
@@ -390,6 +427,60 @@ mod tests {
 
         let err =
             evaluate_worker_client_frame(&codec, &frame).expect_err("ping payload must be empty");
+        assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
+    }
+
+    #[test]
+    fn worker_gqueue_requires_q_string_and_accepts_valid_payload() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut payload = PayloadMap::new();
+        payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        let gqueue = crate::wire::envelope::WireEnvelope::new(GQUEUE_MESSAGE_TYPE, "rid-g", payload);
+        let frame = codec
+            .encode_frame(&gqueue.into_raw())
+            .expect("gqueue should encode");
+
+        let action =
+            evaluate_worker_client_frame(&codec, &frame).expect("gqueue should be accepted");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::GetQueueRequested {
+                request_id: "rid-g".to_owned(),
+                queue_name: "critical".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn worker_lqueues_requires_empty_payload() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let empty = crate::wire::envelope::WireEnvelope::new(
+            LQUEUES_MESSAGE_TYPE,
+            "rid-l",
+            PayloadMap::new(),
+        );
+        let empty_frame = codec
+            .encode_frame(&empty.into_raw())
+            .expect("lqueues should encode");
+
+        let action =
+            evaluate_worker_client_frame(&codec, &empty_frame).expect("lqueues should pass");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::ListQueuesRequested {
+                request_id: "rid-l".to_owned()
+            }
+        );
+
+        let mut payload = PayloadMap::new();
+        payload.insert("unexpected".to_owned(), rmpv::Value::Boolean(true));
+        let nonempty =
+            crate::wire::envelope::WireEnvelope::new(LQUEUES_MESSAGE_TYPE, "rid-bad", payload);
+        let nonempty_frame = codec
+            .encode_frame(&nonempty.into_raw())
+            .expect("lqueues should encode");
+        let err = evaluate_worker_client_frame(&codec, &nonempty_frame)
+            .expect_err("non-empty lqueues payload should fail");
         assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
     }
 }

@@ -19,6 +19,7 @@ use config::AppConfig;
 use events::EventEmitter;
 use heartbeat::{HEARTBEAT_EVENT, Heartbeat};
 use logging::{LogLevel, Logger, LoggerConfig};
+use orchestrator::queues::{Queue, QueueState};
 use orchestrator::queues::persistent::PersistentQueuePool;
 use pools::ConnectionWorkerPools;
 use serde_json::json;
@@ -210,7 +211,12 @@ fn main() {
             wire_codec.as_ref(),
             logger.as_ref(),
         );
-        process_worker_client_messages(pools.as_ref(), wire_codec.as_ref(), logger.as_ref());
+        process_worker_client_messages(
+            pools.as_ref(),
+            wire_codec.as_ref(),
+            logger.as_ref(),
+            persistent_queues.queue_pool(),
+        );
         thread::sleep(Duration::from_millis(100));
     }
 
@@ -647,6 +653,7 @@ fn process_worker_client_messages(
     pools: &ConnectionWorkerPools,
     wire_codec: &WireCodec,
     logger: &Logger,
+    queue_pool: &orchestrator::queues::QueuePool,
 ) {
     let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
     let active_workers = pools.workers.active_connections();
@@ -682,6 +689,77 @@ fn process_worker_client_messages(
                             "PONG response",
                         );
                         let _ = pools.workers.touch_now(worker_id);
+                    }
+                    Ok(WorkerProtocolAction::GetQueueRequested {
+                        request_id,
+                        queue_name,
+                    }) => {
+                        let ok_frame = match queue_pool.get_queue(&queue_name) {
+                            Some(queue) => {
+                                let queue_payload = queue_metadata_payload(queue);
+                                wire_codec.encode_frame(
+                                    &WireEnvelope::ok(request_id, Some(queue_payload)).into_raw(),
+                                )
+                            }
+                            None => {
+                                wire_codec
+                                    .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                            }
+                        };
+
+                        match ok_frame {
+                            Ok(frame) => {
+                                write_response_frame(
+                                    &connection,
+                                    &frame,
+                                    connection.id(),
+                                    logger,
+                                    "GQUEUE OK response",
+                                );
+                                let _ = pools.workers.touch_now(worker_id);
+                            }
+                            Err(error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to build GQUEUE response for worker {worker_id}: {error}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    Ok(WorkerProtocolAction::ListQueuesRequested { request_id }) => {
+                        let queues = queue_pool
+                            .snapshot()
+                            .queues
+                            .into_iter()
+                            .map(queue_to_wire_value)
+                            .collect::<Vec<_>>();
+                        let mut payload = PayloadMap::new();
+                        payload.insert("queues".to_owned(), rmpv::Value::Array(queues));
+                        let ok_frame = wire_codec
+                            .encode_frame(&WireEnvelope::ok(request_id, Some(payload)).into_raw());
+
+                        match ok_frame {
+                            Ok(frame) => {
+                                write_response_frame(
+                                    &connection,
+                                    &frame,
+                                    connection.id(),
+                                    logger,
+                                    "LQUEUES OK response",
+                                );
+                                let _ = pools.workers.touch_now(worker_id);
+                            }
+                            Err(error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to build LQUEUES response for worker {worker_id}: {error}"
+                                    ),
+                                );
+                            }
+                        }
                     }
                     Err(wire::session::SessionError::ProtocolViolation {
                         request_id,
@@ -741,4 +819,53 @@ fn process_worker_client_messages(
             }
         }
     }
+}
+
+fn queue_metadata_payload(queue: &Queue) -> PayloadMap {
+    let mut payload = PayloadMap::new();
+    let queue_value = queue_to_wire_value(queue.clone());
+    let rmpv::Value::Map(entries) = queue_value else {
+        return payload;
+    };
+    for (k, v) in entries {
+        if let rmpv::Value::String(s) = k {
+            if let Some(key) = s.as_str() {
+                payload.insert(key.to_owned(), v);
+            }
+        }
+    }
+    payload
+}
+
+fn queue_to_wire_value(queue: Queue) -> rmpv::Value {
+    let mut config_entries = Vec::new();
+    let concurrency = match queue.config.concurrency_limit {
+        Some(limit) => rmpv::Value::Integer((limit as i64).into()),
+        None => rmpv::Value::Nil,
+    };
+    config_entries.push((rmpv::Value::String("concurrency_limit".into()), concurrency));
+    config_entries.push((
+        rmpv::Value::String("allow_job_overrides".into()),
+        rmpv::Value::Boolean(queue.config.allow_job_overrides),
+    ));
+
+    let state = match queue.state {
+        QueueState::Active => "running",
+        QueueState::Paused => "paused",
+    };
+
+    rmpv::Value::Map(vec![
+        (
+            rmpv::Value::String("name".into()),
+            rmpv::Value::String(queue.name.into()),
+        ),
+        (
+            rmpv::Value::String("state".into()),
+            rmpv::Value::String(state.into()),
+        ),
+        (
+            rmpv::Value::String("config".into()),
+            rmpv::Value::Map(config_entries),
+        ),
+    ])
 }

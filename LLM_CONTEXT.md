@@ -62,6 +62,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Stale HELLOed-but-unregistered connections must receive IDENT (`t=104`) with REGISTER reply deadline metadata.
    - Registered workers may use PING (`t=3`, empty payload) and must receive PONG (`t=105`) with current server time.
    - PING/PONG should remain blocking at connection level (respond with PONG before processing any subsequent worker message).
+   - Registered workers may use GQUEUE (`t=4`, payload `q`) and LQUEUES (`t=5`, empty payload) to query queue metadata via OK responses.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Anonymous metadata should track optional IDENT reply deadline timestamp when IDENT challenge is issued.
