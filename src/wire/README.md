@@ -18,7 +18,8 @@ Provide transport-level wire protocol building blocks while keeping framing/seri
 - `session`: anonymous session ordering + REGISTER flow validation/actions.
   - includes IDENT challenge frame support for stale helloed/unregistered connections
   - includes worker `PING/PONG` request-response helpers
-  - includes worker `GQUEUE/LQUEUES` query message parsing helpers
+  - includes worker `QUEUE/LSQUEUE` query message parsing helpers
+  - includes worker `ADDQUEUE` queue-creation message parsing helpers
   - includes worker `SUBSCRIBE/UNSUBSCRIBE` subscription message parsing helpers
   - includes worker `CREDIT` subscription credit increment parsing helpers
 - `PROTOCOL.md`: implementation-tracking wire protocol draft/spec.

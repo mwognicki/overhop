@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QueueConfig {
@@ -29,6 +30,8 @@ pub enum QueueState {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Queue {
+    #[serde(default = "new_queue_id")]
+    pub id: Uuid,
     pub name: String,
     pub config: QueueConfig,
     pub state: QueueState,
@@ -37,6 +40,7 @@ pub struct Queue {
 impl Queue {
     pub fn new(name: impl Into<String>, config: Option<QueueConfig>) -> Self {
         Self {
+            id: new_queue_id(),
             name: name.into(),
             config: config.unwrap_or_default(),
             state: QueueState::Active,
@@ -99,10 +103,12 @@ impl QueuePool {
     pub fn reconstruct(queues: Vec<Queue>) -> Result<Self, QueuePoolError> {
         let mut pool = Self::new();
         for queue in queues {
-            pool.register_queue(queue.name.clone(), Some(queue.config.clone()))?;
-            if queue.is_paused() {
-                pool.pause_queue(&queue.name)?;
+            if pool.queues.contains_key(&queue.name) {
+                return Err(QueuePoolError::DuplicateQueueName {
+                    name: queue.name.clone(),
+                });
             }
+            pool.queues.insert(queue.name.clone(), queue);
         }
         Ok(pool)
     }
@@ -112,10 +118,12 @@ impl QueuePool {
             serde_json::from_str(json).map_err(QueuePoolError::Deserialize)?;
         let mut pool = Self::new();
         for queue in snapshot.queues {
-            pool.register_queue(queue.name.clone(), Some(queue.config.clone()))?;
-            if queue.is_paused() {
-                pool.pause_queue(&queue.name)?;
+            if pool.queues.contains_key(&queue.name) {
+                return Err(QueuePoolError::DuplicateQueueName {
+                    name: queue.name.clone(),
+                });
             }
+            pool.queues.insert(queue.name.clone(), queue);
         }
         if snapshot.bootstrapped {
             pool.mark_bootstrapped();
@@ -142,15 +150,16 @@ impl QueuePool {
         &mut self,
         name: impl Into<String>,
         config: Option<QueueConfig>,
-    ) -> Result<(), QueuePoolError> {
+    ) -> Result<Uuid, QueuePoolError> {
         let name = name.into();
         if self.queues.contains_key(&name) {
             return Err(QueuePoolError::DuplicateQueueName { name });
         }
 
         let queue = Queue::new(name.clone(), config);
+        let queue_id = queue.id;
         self.queues.insert(name, queue);
-        Ok(())
+        Ok(queue_id)
     }
 
     pub fn get_queue(&self, name: &str) -> Option<&Queue> {
@@ -192,6 +201,10 @@ impl QueuePool {
     pub fn is_bootstrapped(&self) -> bool {
         self.bootstrapped
     }
+}
+
+fn new_queue_id() -> Uuid {
+    Uuid::new_v4()
 }
 
 #[cfg(test)]

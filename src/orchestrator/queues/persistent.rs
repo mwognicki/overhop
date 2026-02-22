@@ -2,6 +2,7 @@ use std::fmt;
 
 use crate::logging::{LogLevel, Logger};
 use crate::storage::{StorageError, StorageFacade};
+use uuid::Uuid;
 
 use super::{Queue, QueueConfig, QueuePool, QueuePoolError};
 
@@ -50,7 +51,7 @@ impl PersistentQueuePool {
         storage: &StorageFacade,
         name: impl Into<String>,
         config: Option<QueueConfig>,
-    ) -> Result<(), PersistentQueuePoolError> {
+    ) -> Result<Uuid, PersistentQueuePoolError> {
         self.mutate_and_reload(storage, |pool| pool.register_queue(name.into(), config))
     }
 
@@ -77,27 +78,28 @@ impl PersistentQueuePool {
         storage.flush().map_err(PersistentQueuePoolError::Storage)
     }
 
-    fn mutate_and_reload<F>(
+    fn mutate_and_reload<F, R>(
         &mut self,
         storage: &StorageFacade,
         mutation: F,
-    ) -> Result<(), PersistentQueuePoolError>
+    ) -> Result<R, PersistentQueuePoolError>
     where
-        F: FnOnce(&mut QueuePool) -> Result<(), QueuePoolError>,
+        F: FnOnce(&mut QueuePool) -> Result<R, QueuePoolError>,
     {
         let current_snapshot = self.pool.snapshot();
         let mut candidate = QueuePool::reconstruct(current_snapshot.queues)
             .map_err(PersistentQueuePoolError::QueuePool)?;
         candidate.mark_bootstrapped();
 
-        mutation(&mut candidate).map_err(PersistentQueuePoolError::QueuePool)?;
+        let mutation_result = mutation(&mut candidate).map_err(PersistentQueuePoolError::QueuePool)?;
 
         let desired = candidate.snapshot().queues;
         storage
             .replace_queues(&desired)
             .map_err(PersistentQueuePoolError::Storage)?;
 
-        self.reload_from_storage(storage)
+        self.reload_from_storage(storage)?;
+        Ok(mutation_result)
     }
 
     fn reload_from_storage(&mut self, storage: &StorageFacade) -> Result<(), PersistentQueuePoolError> {

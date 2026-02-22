@@ -143,7 +143,7 @@ message is processed for that worker connection until `PONG` is produced.
 
 ## Implemented Worker Queue Query Flow
 
-### GQUEUE (worker client -> server)
+### QUEUE (worker client -> server)
 
 - Message type: `t=4`
 - Allowed only for registered workers.
@@ -157,7 +157,7 @@ Response (`OK`, `t=101`):
 - if queue is not found:
   - payload is empty map
 
-### LQUEUES (worker client -> server)
+### LSQUEUE (worker client -> server)
 
 - Message type: `t=5`
 - Allowed only for registered workers.
@@ -167,6 +167,24 @@ Response (`OK`, `t=101`):
 
 - payload contains all queues metadata under `queues` array
 - no pagination/cap applied (full list always returned)
+
+### ADDQUEUE (worker client -> server)
+
+- Message type: `t=9`
+- Allowed only for registered workers.
+- Payload:
+  - `name` (`string`, required): unique queue name
+  - `config` (`map`, optional):
+    - `concurrency_limit` (`int`, optional, positive)
+    - `allow_job_overrides` (`bool`, optional, defaults to `true`)
+
+Response (`OK`, `t=101`):
+
+- payload contains `qid` (UUID string) assigned to the created queue
+
+Failure mode:
+
+- returns `ERR` (`t=102`) if queue already exists or persistence fails
 
 ## Implemented Worker Subscription Flow
 
