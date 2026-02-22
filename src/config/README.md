@@ -19,6 +19,7 @@ Provide a centralized application configuration facade that loads defaults from 
 - `heartbeat` section:
   - `interval_ms`
 - `load_from_toml_with_args(path, args)`: loads TOML, applies argv overrides, deserializes config.
+- `load_with_discovery(args)`: discovers `config.toml` using runtime path precedence, then applies argv overrides.
 
 ## Most Relevant Features
 
@@ -26,9 +27,13 @@ Provide a centralized application configuration facade that loads defaults from 
 - Override value type inferred from existing TOML key type.
 - Unknown dotted paths are rejected.
 - Type mismatches are rejected with explicit error messages.
+- Config discovery order:
+  - `<binary-dir>/config.toml`
+  - `$HOME/.overhop/config.toml`
+  - `/etc/overhop/config.toml`
 - Keeps configuration concerns detached from domain/business logic.
 
 ## Runtime Files
 
-- Default runtime config: `config/overhop.toml`
-- Template config: `config/overhop.template.toml`
+- Default runtime config template in repo: `config/config.toml`
+- Template config: `config/config.template.toml`

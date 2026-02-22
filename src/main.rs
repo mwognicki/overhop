@@ -52,7 +52,7 @@ fn main() {
 }
 
 fn load_config_or_exit() -> AppConfig {
-    match AppConfig::load_from_toml_with_args("config/overhop.toml", std::env::args().skip(1)) {
+    match AppConfig::load_with_discovery(std::env::args().skip(1)) {
         Ok(config) => config,
         Err(error) => {
             eprintln!("configuration error: {error}");

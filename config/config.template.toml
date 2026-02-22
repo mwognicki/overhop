@@ -1,5 +1,5 @@
 # Overhop configuration template
-# Copy this file to `config/overhop.toml` and adjust values.
+# Copy this file to `config/config.toml` and adjust values.
 # Every key may be overridden through argv with dotted notation.
 
 [logging]

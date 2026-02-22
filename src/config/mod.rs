@@ -1,6 +1,6 @@
 use std::fmt;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use toml::Value;
@@ -47,6 +47,13 @@ impl AppConfig {
 
         root_value.try_into().map_err(ConfigError::Deserialize)
     }
+
+    pub fn load_with_discovery(
+        args: impl IntoIterator<Item = String>,
+    ) -> Result<Self, ConfigError> {
+        let config_path = resolve_config_path()?;
+        Self::load_from_toml_with_args(config_path, args)
+    }
 }
 
 #[derive(Debug)]
@@ -80,6 +87,9 @@ pub enum ConfigError {
         expected: &'static str,
         value: String,
     },
+    ConfigNotFound {
+        searched: Vec<String>,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -112,6 +122,11 @@ impl fmt::Display for ConfigError {
                 f,
                 "invalid value '{value}' for '{key}', expected type {expected}"
             ),
+            Self::ConfigNotFound { searched } => write!(
+                f,
+                "config.toml was not found in any expected location: {}",
+                searched.join(", ")
+            ),
         }
     }
 }
@@ -139,6 +154,41 @@ fn parse_cli_overrides(args: impl IntoIterator<Item = String>) -> Result<Vec<(St
     }
 
     Ok(parsed)
+}
+
+fn resolve_config_path() -> Result<PathBuf, ConfigError> {
+    let candidates = config_candidates();
+    if let Some(found) = first_existing_path(&candidates) {
+        return Ok(found);
+    }
+
+    Err(ConfigError::ConfigNotFound {
+        searched: candidates
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect(),
+    })
+}
+
+fn config_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            candidates.push(parent.join("config.toml"));
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(Path::new(&home).join(".overhop").join("config.toml"));
+    }
+
+    candidates.push(PathBuf::from("/etc/overhop/config.toml"));
+    candidates
+}
+
+fn first_existing_path(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|path| path.exists()).cloned()
 }
 
 fn apply_override(root: &mut Value, key_path: &str, raw_value: &str) -> Result<(), ConfigError> {
@@ -318,5 +368,24 @@ interval_ms = 1000
         fs::remove_file(path).expect("temp config cleanup should succeed");
 
         assert!(matches!(err, ConfigError::UnknownPath { .. }));
+    }
+
+    #[test]
+    fn picks_first_existing_candidate() {
+        let base = std::env::temp_dir().join(format!(
+            "overhop-config-candidates-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&base).expect("failed to create temp candidate directory");
+
+        let missing = base.join("missing.toml");
+        let found = base.join("config.toml");
+        fs::write(&found, "x").expect("failed to write temp candidate file");
+
+        let selected = super::first_existing_path(&[missing, found.clone()]);
+        fs::remove_file(&found).expect("failed to clean temp candidate file");
+        fs::remove_dir_all(&base).expect("failed to clean temp candidate directory");
+
+        assert_eq!(selected, Some(found));
     }
 }

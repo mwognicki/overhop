@@ -30,6 +30,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 12. Application configuration lives in `src/config/mod.rs`:
    - Keep TOML as the default config source.
    - Keep argv overrides generic using dotted key paths (`--section.key value`) without hardcoded flag mappings.
+   - Keep config discovery precedence: `<binary-dir>/config.toml`, then `$HOME/.overhop/config.toml`, then `/etc/overhop/config.toml`.
 
 ## Intent
 
