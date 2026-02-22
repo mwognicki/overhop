@@ -242,4 +242,7 @@ fn print_startup_banner() {
     println!("{APP_DESCRIPTION}");
     println!("{COPYRIGHT_NOTICE}");
     println!("{LIABILITY_NOTICE}");
+    println!();
+    println!("================================================================");
+    println!();
 }
