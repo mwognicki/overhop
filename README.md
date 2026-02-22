@@ -39,6 +39,31 @@ This is an experimental project, but it's not aimed at undermining LLMs or provi
 
 That shapes everything about how the project is developed. It isn't a quick prototype or a throwaway research spike. It's built with proper documentation, changelogs, and CI/CD tooling from the start — because the experiment only means something if the output is something worth shipping.
 
+## Changelog and Commit Discipline
+
+The repository uses a strict, commit-coupled changelog workflow:
+
+- `CHANGELOG.md` is the canonical release history.
+- Unreleased work is tracked as fragment files in `.changelog/unreleased/`.
+- Every meaningful commit should stage at least one fragment.
+- Commit messages must follow readable Conventional Commit format.
+
+Git hooks are versioned in `.githooks/`:
+
+- `pre-commit` enforces changelog fragments for behavior/code changes.
+- `commit-msg` enforces commit message quality and structure.
+
+Hook activation for this clone:
+
+`git config core.hooksPath .githooks`
+
+Release flow:
+
+1. Add fragments while implementing changes.
+2. Optional helper: `scripts/new_changelog_fragment.sh <type> <slug> [message]`.
+3. Run `scripts/release_changelog.sh <version> <YYYY-MM-DD>`.
+4. Commit the release changelog update.
+
 ## Architectural Philosophy
 
 This is not "AI, build me a queue system."

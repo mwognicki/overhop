@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+msg_file="$1"
+first_line="$(head -n1 "$msg_file")"
+
+# Allow merge/revert/fixup/squash generated commits.
+if [[ "$first_line" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
+  exit 0
+fi
+
+pattern='^(feat|fix|refactor|perf|test|build|ci|docs|chore|style|revert)(\([a-z0-9._/-]+\))?(!)?: [A-Z0-9].{7,}$'
+
+if [[ ! "$first_line" =~ $pattern ]]; then
+  cat <<'ERR'
+ERROR: Invalid commit message format.
+
+Use:
+  <type>(optional-scope): <Readable summary>
+
+Examples:
+  feat(queue): Add in-memory queue registry with capacity guard
+  refactor(protocol): Extract frame parser into dedicated module
+  docs(changelog): Define fragment-based release note policy
+
+Rules:
+  - type in: feat|fix|refactor|perf|test|build|ci|docs|chore|style|revert
+  - summary starts with uppercase or number
+  - minimum summary length after ": " is 8 characters
+ERR
+  exit 1
+fi

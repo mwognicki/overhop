@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Skip checks for merge commits.
+if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+  exit 0
+fi
+
+staged_files="$(git diff --cached --name-only)"
+[[ -z "$staged_files" ]] && exit 0
+
+# Allow docs-only or metadata-only commits without fragment.
+if echo "$staged_files" | rg -qv '^(README\.md|LICENSE|\.gitignore|\.idea/|\.githooks/|\.changelog/README\.md|LLM_CONTEXT\.md)$'; then
+  needs_fragment=1
+else
+  needs_fragment=0
+fi
+
+if [[ "$needs_fragment" -eq 1 ]]; then
+  if ! echo "$staged_files" | rg -q '^\.changelog/unreleased/.+\.md$'; then
+    cat <<'ERR'
+ERROR: Missing changelog fragment.
+
+This commit changes code or behavior-related files, so include a staged fragment in:
+  .changelog/unreleased/*.md
+
+See:
+  .changelog/README.md
+ERR
+    exit 1
+  fi
+fi

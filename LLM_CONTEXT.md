@@ -10,6 +10,10 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 4. Always update `LLM_CONTEXT.md` when the user explicitly asks to do so.
 5. RustRover is the primary IDE workflow. Do not download crates manually; only add or modify dependencies in `Cargo.toml` and let the IDE/tooling resolve them.
 6. Logical modules should generally be designed to support independent development and extension, detached from `main.rs` where practical.
+7. Follow commit-coupled changelog policy:
+   - For meaningful commits, include at least one `.changelog/unreleased/*.md` fragment.
+   - Use readable Conventional Commit messages.
+   - Keep fragment entries concise and release-note oriented.
 
 ## Intent
 
