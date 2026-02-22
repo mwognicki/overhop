@@ -14,6 +14,7 @@ Provide foundational queue registry abstractions for queue orchestration with un
 ## Core Concepts
 
 - `Queue`
+  - `id` (UUID assigned on queue creation)
   - `name` (unique string)
   - `config`
     - `concurrency_limit` (optional)
@@ -33,6 +34,7 @@ Provide foundational queue registry abstractions for queue orchestration with un
 ## Most Relevant Features
 
 - Unique queue registration guard.
+- Queue creation returns persistent queue UUID for wire/API callers.
 - Serializable queue and pool snapshot structures for storage compatibility.
 - Pause/resume state persistence through JSON snapshots.
 - Headless reconstruction helper for storage-driven bootstrapping flows.

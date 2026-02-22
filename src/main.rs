@@ -20,7 +20,7 @@ use events::EventEmitter;
 use heartbeat::{HEARTBEAT_EVENT, Heartbeat};
 use logging::{LogLevel, Logger, LoggerConfig};
 use orchestrator::queues::{Queue, QueueState};
-use orchestrator::queues::persistent::PersistentQueuePool;
+use orchestrator::queues::persistent::{PersistentQueuePool, PersistentQueuePoolError};
 use pools::{ConnectionWorkerPools, PoolError};
 use serde_json::json;
 use server::TcpServer;
@@ -56,7 +56,7 @@ fn main() {
         eprintln!("storage initialization error: {error}");
         process::exit(2);
     });
-    let persistent_queues =
+    let mut persistent_queues =
         PersistentQueuePool::bootstrap(&storage, logger.as_ref()).unwrap_or_else(|error| {
             eprintln!("queue bootstrap error: {error}");
             process::exit(2);
@@ -215,7 +215,8 @@ fn main() {
             pools.as_ref(),
             wire_codec.as_ref(),
             logger.as_ref(),
-            persistent_queues.queue_pool(),
+            &storage,
+            &mut persistent_queues,
         );
         thread::sleep(Duration::from_millis(100));
     }
@@ -653,7 +654,8 @@ fn process_worker_client_messages(
     pools: &ConnectionWorkerPools,
     wire_codec: &WireCodec,
     logger: &Logger,
-    queue_pool: &orchestrator::queues::QueuePool,
+    storage: &StorageFacade,
+    persistent_queues: &mut PersistentQueuePool,
 ) {
     let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
     let active_workers = pools.workers.active_connections();
@@ -690,11 +692,11 @@ fn process_worker_client_messages(
                         );
                         let _ = pools.workers.touch_now(worker_id);
                     }
-                    Ok(WorkerProtocolAction::GetQueueRequested {
+                    Ok(WorkerProtocolAction::QueueRequested {
                         request_id,
                         queue_name,
                     }) => {
-                        let ok_frame = match queue_pool.get_queue(&queue_name) {
+                        let ok_frame = match persistent_queues.queue_pool().get_queue(&queue_name) {
                             Some(queue) => {
                                 let queue_payload = queue_metadata_payload(queue);
                                 wire_codec.encode_frame(
@@ -714,7 +716,7 @@ fn process_worker_client_messages(
                                     &frame,
                                     connection.id(),
                                     logger,
-                                    "GQUEUE OK response",
+                                    "QUEUE OK response",
                                 );
                                 let _ = pools.workers.touch_now(worker_id);
                             }
@@ -722,14 +724,15 @@ fn process_worker_client_messages(
                                 logger.warn(
                                     Some("main::wire"),
                                     &format!(
-                                        "failed to build GQUEUE response for worker {worker_id}: {error}"
+                                        "failed to build QUEUE response for worker {worker_id}: {error}"
                                     ),
                                 );
                             }
                         }
                     }
-                    Ok(WorkerProtocolAction::ListQueuesRequested { request_id }) => {
-                        let queues = queue_pool
+                    Ok(WorkerProtocolAction::LsQueueRequested { request_id }) => {
+                        let queues = persistent_queues
+                            .queue_pool()
                             .snapshot()
                             .queues
                             .into_iter()
@@ -747,7 +750,7 @@ fn process_worker_client_messages(
                                     &frame,
                                     connection.id(),
                                     logger,
-                                    "LQUEUES OK response",
+                                    "LSQUEUE OK response",
                                 );
                                 let _ = pools.workers.touch_now(worker_id);
                             }
@@ -755,18 +758,66 @@ fn process_worker_client_messages(
                                 logger.warn(
                                     Some("main::wire"),
                                     &format!(
-                                        "failed to build LQUEUES response for worker {worker_id}: {error}"
+                                        "failed to build LSQUEUE response for worker {worker_id}: {error}"
                                     ),
                                 );
                             }
                         }
                     }
+                    Ok(WorkerProtocolAction::AddQueueRequested {
+                        request_id,
+                        queue_name,
+                        config,
+                    }) => match persistent_queues.register_queue(storage, &queue_name, config) {
+                        Ok(queue_id) => {
+                            let mut payload = PayloadMap::new();
+                            payload.insert(
+                                "qid".to_owned(),
+                                rmpv::Value::String(queue_id.to_string().into()),
+                            );
+                            match wire_codec
+                                .encode_frame(&WireEnvelope::ok(request_id, Some(payload)).into_raw())
+                            {
+                                Ok(frame) => {
+                                    write_response_frame(
+                                        &connection,
+                                        &frame,
+                                        connection.id(),
+                                        logger,
+                                        "ADDQUEUE OK response",
+                                    );
+                                    let _ = pools.workers.touch_now(worker_id);
+                                }
+                                Err(error) => {
+                                    logger.warn(
+                                        Some("main::wire"),
+                                        &format!(
+                                            "failed to build ADDQUEUE response for worker {worker_id}: {error}"
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            let (code, message) =
+                                map_persistent_queue_error_for_worker_error(&error, &queue_name);
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                code,
+                                &message,
+                            );
+                        }
+                    },
                     Ok(WorkerProtocolAction::SubscribeRequested {
                         request_id,
                         queue_name,
                         credits,
                     }) => {
-                        if queue_pool.get_queue(&queue_name).is_none() {
+                        if persistent_queues.queue_pool().get_queue(&queue_name).is_none() {
                             let _ = send_worker_protocol_error(
                                 wire_codec,
                                 logger,
@@ -779,7 +830,11 @@ fn process_worker_client_messages(
                             continue;
                         }
 
-                        match pools.subscribe_worker_to_queue(worker_id, &queue_name, queue_pool) {
+                        match pools.subscribe_worker_to_queue(
+                            worker_id,
+                            &queue_name,
+                            persistent_queues.queue_pool(),
+                        ) {
                             Ok(subscription_id) => {
                                 if credits > 0 {
                                     if let Err(error) = pools.add_worker_subscription_credits(
@@ -1045,6 +1100,33 @@ fn map_pool_error_for_worker_error(error: &PoolError) -> (&'static str, String) 
     }
 }
 
+fn map_persistent_queue_error_for_worker_error(
+    error: &PersistentQueuePoolError,
+    queue_name: &str,
+) -> (&'static str, String) {
+    match error {
+        PersistentQueuePoolError::QueuePool(orchestrator::queues::QueuePoolError::DuplicateQueueName {
+            ..
+        }) => (
+            "DUPLICATE_QUEUE",
+            format!("queue '{queue_name}' is already registered"),
+        ),
+        PersistentQueuePoolError::QueuePool(orchestrator::queues::QueuePoolError::QueueNotFound {
+            ..
+        }) => (
+            "QUEUE_NOT_FOUND",
+            format!("queue '{queue_name}' not found"),
+        ),
+        PersistentQueuePoolError::QueuePool(inner) => {
+            ("QUEUE_POOL_ERROR", format!("queue pool operation failed: {inner}"))
+        }
+        PersistentQueuePoolError::Storage(inner) => (
+            "QUEUE_PERSISTENCE_ERROR",
+            format!("queue persistence operation failed: {inner}"),
+        ),
+    }
+}
+
 fn queue_metadata_payload(queue: &Queue) -> PayloadMap {
     let mut payload = PayloadMap::new();
     let queue_value = queue_to_wire_value(queue.clone());
@@ -1079,6 +1161,10 @@ fn queue_to_wire_value(queue: Queue) -> rmpv::Value {
     };
 
     rmpv::Value::Map(vec![
+        (
+            rmpv::Value::String("id".into()),
+            rmpv::Value::String(queue.id.to_string().into()),
+        ),
         (
             rmpv::Value::String("name".into()),
             rmpv::Value::String(queue.name.into()),

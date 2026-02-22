@@ -62,7 +62,8 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Stale HELLOed-but-unregistered connections must receive IDENT (`t=104`) with REGISTER reply deadline metadata.
    - Registered workers may use PING (`t=3`, empty payload) and must receive PONG (`t=105`) with current server time.
    - PING/PONG should remain blocking at connection level (respond with PONG before processing any subsequent worker message).
-   - Registered workers may use GQUEUE (`t=4`, payload `q`) and LQUEUES (`t=5`, empty payload) to query queue metadata via OK responses.
+   - Registered workers may use QUEUE (`t=4`, payload `q`) and LSQUEUE (`t=5`, empty payload) to query queue metadata via OK responses.
+   - Registered workers may use ADDQUEUE (`t=9`, payload `name` + optional `config`) to create persisted queues and receive assigned `qid`.
    - Registered workers may use SUBSCRIBE (`t=6`, payload `q` plus optional non-negative `credits`) and UNSUBSCRIBE (`t=7`, payload `sid`) for queue subscription lifecycle.
    - Registered workers may use CREDIT (`t=8`, payload `sid` + positive `credits`) to increase credits on their own subscriptions only.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:

@@ -11,7 +11,8 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Builds protocol violation `ERR` response frames.
 - Builds IDENT challenge frames (`t=104`) for delayed unregistered anonymous clients.
 - Supports worker-side PING request validation and PONG response frame construction.
-- Supports worker queue query requests (`GQUEUE`, `LQUEUES`) parsing/validation.
+- Supports worker queue query requests (`QUEUE`, `LSQUEUE`) parsing/validation.
+- Supports worker queue registration request (`ADDQUEUE`) parsing/validation.
 - Supports worker subscription flow requests (`SUBSCRIBE`, `UNSUBSCRIBE`) parsing/validation.
 - Supports worker credit increment request (`CREDIT`) parsing/validation.
 
@@ -22,8 +23,9 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - `REGISTER` payload must be empty map.
 - IDENT challenge payload includes register timeout and reply deadline metadata.
 - Worker `PING` payload must be empty map, and `PONG` includes server timestamp.
-- Worker `GQUEUE` payload must include queue name under `q`.
-- Worker `LQUEUES` payload must be empty and returns full queue list metadata.
+- Worker `QUEUE` payload must include queue name under `q`.
+- Worker `LSQUEUE` payload must be empty and returns full queue list metadata.
+- Worker `ADDQUEUE` payload must include queue `name` and optional `config`.
 - Worker `SUBSCRIBE` payload must include queue name under `q`, with optional non-negative `credits`.
 - Worker `UNSUBSCRIBE` payload must include `sid` as UUID string.
 - Worker `CREDIT` payload must include `sid` (UUID string) and positive `credits` amount.

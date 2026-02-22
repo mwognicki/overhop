@@ -2,17 +2,19 @@ use std::fmt;
 
 use uuid::Uuid;
 
+use crate::orchestrator::queues::QueueConfig;
 use crate::wire::codec::{CodecError, WireCodec};
 use crate::wire::envelope::{EnvelopeError, WireEnvelope};
 use crate::wire::handshake::{process_client_handshake_frame, HELLO_MESSAGE_TYPE};
 
 pub const REGISTER_MESSAGE_TYPE: i64 = 2;
 pub const PING_MESSAGE_TYPE: i64 = 3;
-pub const GQUEUE_MESSAGE_TYPE: i64 = 4;
-pub const LQUEUES_MESSAGE_TYPE: i64 = 5;
+pub const QUEUE_MESSAGE_TYPE: i64 = 4;
+pub const LSQUEUE_MESSAGE_TYPE: i64 = 5;
 pub const SUBSCRIBE_MESSAGE_TYPE: i64 = 6;
 pub const UNSUBSCRIBE_MESSAGE_TYPE: i64 = 7;
 pub const CREDIT_MESSAGE_TYPE: i64 = 8;
+pub const ADDQUEUE_MESSAGE_TYPE: i64 = 9;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -28,8 +30,13 @@ pub enum AnonymousProtocolAction {
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorkerProtocolAction {
     PingRequested { request_id: String },
-    GetQueueRequested { request_id: String, queue_name: String },
-    ListQueuesRequested { request_id: String },
+    QueueRequested { request_id: String, queue_name: String },
+    LsQueueRequested { request_id: String },
+    AddQueueRequested {
+        request_id: String,
+        queue_name: String,
+        config: Option<QueueConfig>,
+    },
     SubscribeRequested {
         request_id: String,
         queue_name: String,
@@ -142,7 +149,7 @@ pub fn evaluate_worker_client_frame(
         .map_err(SessionError::Envelope)?;
 
     if envelope.message_type != PING_MESSAGE_TYPE {
-        if envelope.message_type == GQUEUE_MESSAGE_TYPE {
+        if envelope.message_type == QUEUE_MESSAGE_TYPE {
             let queue_name = envelope
                 .payload
                 .get("q")
@@ -151,25 +158,106 @@ pub fn evaluate_worker_client_frame(
                 .ok_or_else(|| SessionError::ProtocolViolation {
                     request_id: Some(envelope.request_id.clone()),
                     code: PROTOCOL_VIOLATION_CODE.to_owned(),
-                    message: "GQUEUE payload must contain string key 'q'".to_owned(),
+                    message: "QUEUE payload must contain string key 'q'".to_owned(),
                 })?;
-            return Ok(WorkerProtocolAction::GetQueueRequested {
+            return Ok(WorkerProtocolAction::QueueRequested {
                 request_id: envelope.request_id,
                 queue_name,
             });
         }
 
-        if envelope.message_type == LQUEUES_MESSAGE_TYPE {
+        if envelope.message_type == LSQUEUE_MESSAGE_TYPE {
             if !envelope.payload.is_empty() {
                 return Err(SessionError::ProtocolViolation {
                     request_id: Some(envelope.request_id),
                     code: PROTOCOL_VIOLATION_CODE.to_owned(),
-                    message: "LQUEUES payload must be an empty map".to_owned(),
+                    message: "LSQUEUE payload must be an empty map".to_owned(),
                 });
             }
 
-            return Ok(WorkerProtocolAction::ListQueuesRequested {
+            return Ok(WorkerProtocolAction::LsQueueRequested {
                 request_id: envelope.request_id,
+            });
+        }
+
+        if envelope.message_type == ADDQUEUE_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("name")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "ADDQUEUE payload must contain string key 'name'".to_owned(),
+                })?;
+
+            let config = match envelope.payload.get("config") {
+                Some(rmpv::Value::Map(entries)) => {
+                    let mut concurrency_limit: Option<u32> = None;
+                    let mut allow_job_overrides: Option<bool> = None;
+
+                    for (key, value) in entries {
+                        let Some(key_str) = key.as_str() else {
+                            continue;
+                        };
+                        if key_str == "concurrency_limit" {
+                            if value.is_nil() {
+                                concurrency_limit = None;
+                                continue;
+                            }
+                            let Some(raw) = value.as_i64() else {
+                                return Err(SessionError::ProtocolViolation {
+                                    request_id: Some(envelope.request_id.clone()),
+                                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                                    message: "ADDQUEUE config.concurrency_limit must be positive integer or nil"
+                                        .to_owned(),
+                                });
+                            };
+                            if raw <= 0 || raw > u32::MAX as i64 {
+                                return Err(SessionError::ProtocolViolation {
+                                    request_id: Some(envelope.request_id.clone()),
+                                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                                    message: "ADDQUEUE config.concurrency_limit must be in range 1..=u32::MAX"
+                                        .to_owned(),
+                                });
+                            }
+                            concurrency_limit = Some(raw as u32);
+                            continue;
+                        }
+                        if key_str == "allow_job_overrides" {
+                            let Some(flag) = value.as_bool() else {
+                                return Err(SessionError::ProtocolViolation {
+                                    request_id: Some(envelope.request_id.clone()),
+                                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                                    message: "ADDQUEUE config.allow_job_overrides must be bool"
+                                        .to_owned(),
+                                });
+                            };
+                            allow_job_overrides = Some(flag);
+                            continue;
+                        }
+                    }
+
+                    Some(QueueConfig {
+                        concurrency_limit,
+                        allow_job_overrides: allow_job_overrides.unwrap_or(true),
+                    })
+                }
+                Some(_) => {
+                    return Err(SessionError::ProtocolViolation {
+                        request_id: Some(envelope.request_id.clone()),
+                        code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                        message: "ADDQUEUE payload key 'config' must be map".to_owned(),
+                    });
+                }
+                None => None,
+            };
+
+            return Ok(WorkerProtocolAction::AddQueueRequested {
+                request_id: envelope.request_id,
+                queue_name,
+                config,
             });
         }
 
@@ -283,7 +371,7 @@ pub fn evaluate_worker_client_frame(
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
             message:
-                "registered workers can currently send only PING, GQUEUE, LQUEUES, SUBSCRIBE, UNSUBSCRIBE, or CREDIT"
+                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, or ADDQUEUE"
                     .to_owned(),
         });
     }
@@ -381,8 +469,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        AnonymousProtocolAction, GQUEUE_MESSAGE_TYPE, IDENT_MESSAGE_TYPE, LQUEUES_MESSAGE_TYPE,
-        CREDIT_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, SUBSCRIBE_MESSAGE_TYPE,
+        ADDQUEUE_MESSAGE_TYPE, AnonymousProtocolAction, CREDIT_MESSAGE_TYPE, IDENT_MESSAGE_TYPE,
+        LSQUEUE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE,
         PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, WorkerProtocolAction,
         UNSUBSCRIBE_MESSAGE_TYPE,
         build_ident_frame, build_pong_frame, build_protocol_error_frame,
@@ -559,20 +647,20 @@ mod tests {
     }
 
     #[test]
-    fn worker_gqueue_requires_q_string_and_accepts_valid_payload() {
+    fn worker_queue_requires_q_string_and_accepts_valid_payload() {
         let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
         let mut payload = PayloadMap::new();
         payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
-        let gqueue = crate::wire::envelope::WireEnvelope::new(GQUEUE_MESSAGE_TYPE, "rid-g", payload);
+        let queue = crate::wire::envelope::WireEnvelope::new(QUEUE_MESSAGE_TYPE, "rid-g", payload);
         let frame = codec
-            .encode_frame(&gqueue.into_raw())
-            .expect("gqueue should encode");
+            .encode_frame(&queue.into_raw())
+            .expect("queue should encode");
 
         let action =
-            evaluate_worker_client_frame(&codec, &frame).expect("gqueue should be accepted");
+            evaluate_worker_client_frame(&codec, &frame).expect("queue should be accepted");
         assert_eq!(
             action,
-            WorkerProtocolAction::GetQueueRequested {
+            WorkerProtocolAction::QueueRequested {
                 request_id: "rid-g".to_owned(),
                 queue_name: "critical".to_owned()
             }
@@ -580,22 +668,22 @@ mod tests {
     }
 
     #[test]
-    fn worker_lqueues_requires_empty_payload() {
+    fn worker_lsqueue_requires_empty_payload() {
         let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
         let empty = crate::wire::envelope::WireEnvelope::new(
-            LQUEUES_MESSAGE_TYPE,
+            LSQUEUE_MESSAGE_TYPE,
             "rid-l",
             PayloadMap::new(),
         );
         let empty_frame = codec
             .encode_frame(&empty.into_raw())
-            .expect("lqueues should encode");
+            .expect("lsqueue should encode");
 
         let action =
-            evaluate_worker_client_frame(&codec, &empty_frame).expect("lqueues should pass");
+            evaluate_worker_client_frame(&codec, &empty_frame).expect("lsqueue should pass");
         assert_eq!(
             action,
-            WorkerProtocolAction::ListQueuesRequested {
+            WorkerProtocolAction::LsQueueRequested {
                 request_id: "rid-l".to_owned()
             }
         );
@@ -603,13 +691,58 @@ mod tests {
         let mut payload = PayloadMap::new();
         payload.insert("unexpected".to_owned(), rmpv::Value::Boolean(true));
         let nonempty =
-            crate::wire::envelope::WireEnvelope::new(LQUEUES_MESSAGE_TYPE, "rid-bad", payload);
+            crate::wire::envelope::WireEnvelope::new(LSQUEUE_MESSAGE_TYPE, "rid-bad", payload);
         let nonempty_frame = codec
             .encode_frame(&nonempty.into_raw())
-            .expect("lqueues should encode");
+            .expect("lsqueue should encode");
         let err = evaluate_worker_client_frame(&codec, &nonempty_frame)
-            .expect_err("non-empty lqueues payload should fail");
+            .expect_err("non-empty lsqueue payload should fail");
         assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
+    }
+
+    #[test]
+    fn worker_addqueue_accepts_name_and_optional_config() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut config = PayloadMap::new();
+        config.insert(
+            "concurrency_limit".to_owned(),
+            rmpv::Value::Integer(4_i64.into()),
+        );
+        config.insert(
+            "allow_job_overrides".to_owned(),
+            rmpv::Value::Boolean(false),
+        );
+        let mut payload = PayloadMap::new();
+        payload.insert("name".to_owned(), rmpv::Value::String("bulk".into()));
+        payload.insert(
+            "config".to_owned(),
+            rmpv::Value::Map(
+                config
+                    .into_iter()
+                    .map(|(k, v)| (rmpv::Value::String(k.into()), v))
+                    .collect(),
+            ),
+        );
+
+        let addqueue =
+            crate::wire::envelope::WireEnvelope::new(ADDQUEUE_MESSAGE_TYPE, "rid-a", payload);
+        let frame = codec
+            .encode_frame(&addqueue.into_raw())
+            .expect("addqueue should encode");
+
+        let action =
+            evaluate_worker_client_frame(&codec, &frame).expect("addqueue should be accepted");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::AddQueueRequested {
+                request_id: "rid-a".to_owned(),
+                queue_name: "bulk".to_owned(),
+                config: Some(crate::orchestrator::queues::QueueConfig {
+                    concurrency_limit: Some(4),
+                    allow_job_overrides: false,
+                }),
+            }
+        );
     }
 
     #[test]
