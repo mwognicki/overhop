@@ -49,14 +49,17 @@ fn main() {
     if runtime_flags.enabled {
         app_config.storage.path = self_debug::resolve_storage_path(&app_config.storage);
     }
-    let log_level =
+    let log_level = if runtime_flags.enabled {
+        LogLevel::Verbose
+    } else {
         LogLevel::from_config_value(&app_config.logging.level).unwrap_or_else(|| {
             eprintln!(
                 "invalid logging.level '{}'. Allowed values: error, warn, info, debug, verbose",
                 app_config.logging.level
             );
             process::exit(2);
-        });
+        })
+    };
 
     let logger = Arc::new(Logger::new(LoggerConfig {
         min_level: log_level,

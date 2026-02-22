@@ -23,6 +23,7 @@ const COLOR_OUT: &str = "\x1b[38;5;81m";
 const COLOR_IN: &str = "\x1b[38;5;120m";
 const COLOR_ERROR: &str = "\x1b[38;5;196m";
 const COLOR_DIM: &str = "\x1b[2;90m";
+const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
 #[derive(Debug)]
@@ -269,7 +270,8 @@ fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>, SelfDebugError> {
 
 fn print_decoded(label: &str, envelope: &WireEnvelope, color: &str) {
     let json = envelope_to_json_line(envelope);
-    println!("{color}[{label}]{RESET} {json}");
+    let message_name = message_type_name(envelope.message_type);
+    println!("{color}[{label}] {BOLD}{message_name}{RESET} {json}");
 }
 
 fn envelope_to_json_line(envelope: &WireEnvelope) -> String {
@@ -337,4 +339,25 @@ fn require_string(payload: &PayloadMap, key: &'static str) -> Result<String, Sel
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or(SelfDebugError::MissingField(key))
+}
+
+fn message_type_name(message_type: i64) -> &'static str {
+    match message_type {
+        HELLO_MESSAGE_TYPE => "HELLO",
+        REGISTER_MESSAGE_TYPE => "REGISTER",
+        PING_MESSAGE_TYPE => "PING",
+        QUEUE_MESSAGE_TYPE => "QUEUE",
+        LSQUEUE_MESSAGE_TYPE => "LSQUEUE",
+        SUBSCRIBE_MESSAGE_TYPE => "SUBSCRIBE",
+        UNSUBSCRIBE_MESSAGE_TYPE => "UNSUBSCRIBE",
+        CREDIT_MESSAGE_TYPE => "CREDIT",
+        ADDQUEUE_MESSAGE_TYPE => "ADDQUEUE",
+        STATUS_MESSAGE_TYPE => "STATUS",
+        crate::wire::envelope::SERVER_OK_MESSAGE_TYPE => "OK",
+        crate::wire::envelope::SERVER_ERR_MESSAGE_TYPE => "ERR",
+        crate::wire::handshake::HI_MESSAGE_TYPE => "HI",
+        crate::wire::session::IDENT_MESSAGE_TYPE => "IDENT",
+        crate::wire::session::PONG_MESSAGE_TYPE => "PONG",
+        _ => "UNKNOWN",
+    }
 }

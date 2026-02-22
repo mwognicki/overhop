@@ -100,10 +100,11 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - STATUS success response should return diagnostics categories under generic OK payload; failures should return ERR.
 27. Self-debug mode is implemented in `src/self_debug/mod.rs`:
    - Runtime flag `--self-debug` enables in-process self-debug client flow against local TCP server.
+   - Self-debug mode must force logger minimum level to `VERBOSE`, regardless of config/argv logging values.
    - Self-debug mode must use isolated storage path (configured via `storage.self_debug_path` or derived as `<storage.path>-self-debug`).
    - Self-debug mode must never reuse regular runtime storage path.
    - On self-debug completion (success or failure), remove self-debug storage artifacts, then propagate run result.
-   - Keep self-debug output human-readable with clear IN/OUT separation and decoded envelope JSON payloads.
+   - Keep self-debug output human-readable with clear IN/OUT separation, bold message type names, and decoded envelope JSON payloads.
    - Keep self-debug logic isolated from core domain and protocol handler paths.
 28. Runtime platform and startup cosmetics:
    - Overhop runtime target is POSIX (`unix`) only.

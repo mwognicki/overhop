@@ -8,8 +8,9 @@ Run an in-process wire protocol self-check by acting as a local Overhop client a
 
 - Starts only when runtime flag `--self-debug` is present.
 - Uses dedicated self-debug storage path, never the regular runtime path.
+- Forces application logging level to `VERBOSE` while self-debug mode is active.
 - Uses decoded wire envelopes for all console output.
-- Prints clear directional logs (`OUT`/`IN`) with colorful formatting and inline JSON payloads.
+- Prints clear directional logs (`OUT`/`IN`) with colorful formatting, bold message type names, and inline JSON payloads.
 
 ## Most Relevant Features
 
