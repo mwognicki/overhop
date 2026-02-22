@@ -14,6 +14,10 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - For meaningful commits, include at least one `.changelog/unreleased/*.md` fragment.
    - Use readable Conventional Commit messages.
    - Keep fragment entries concise and release-note oriented.
+8. Use branch-based development flow:
+   - Create and work on `feat/*`, `quickfix/*`, or `chore/*` branches.
+   - Avoid direct pushes to `main`.
+   - Prefer merging through PRs from topic branch to `main`.
 
 ## Intent
 
