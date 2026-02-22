@@ -189,6 +189,15 @@ impl AnonymousConnectionsPool {
             .expect("anonymous pool lock poisoned")
             .len()
     }
+
+    pub fn active_connections(&self) -> Vec<(u64, Arc<PersistentConnection>)> {
+        self.records
+            .lock()
+            .expect("anonymous pool lock poisoned")
+            .iter()
+            .map(|(id, record)| (*id, Arc::clone(&record.connection)))
+            .collect()
+    }
 }
 
 #[derive(Default)]

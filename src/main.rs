@@ -12,6 +12,7 @@ mod wire;
 use std::process;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{io, thread};
 
 use config::AppConfig;
 use events::EventEmitter;
@@ -24,6 +25,7 @@ use server::TcpServer;
 use storage::StorageFacade;
 use shutdown::ShutdownHooks;
 use wire::codec::WireCodec;
+use wire::handshake::process_client_handshake_frame;
 
 fn main() {
     ensure_posix_or_exit();
@@ -160,7 +162,8 @@ fn main() {
                 })),
             );
         }
-        std::thread::sleep(Duration::from_millis(100));
+        process_anonymous_hello_handshakes(&pools, &wire_codec, &logger);
+        thread::sleep(Duration::from_millis(100));
     }
 
     logger.info(
@@ -251,4 +254,89 @@ fn print_startup_banner() {
     println!();
     println!("================================================================");
     println!();
+}
+
+fn process_anonymous_hello_handshakes(
+    pools: &ConnectionWorkerPools,
+    wire_codec: &WireCodec,
+    logger: &Logger,
+) {
+    let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
+    let active_connections = pools.anonymous.active_connections();
+
+    for (connection_id, connection) in active_connections {
+        let mut read_buffer = vec![0_u8; read_buffer_len];
+        match connection.try_read(&mut read_buffer) {
+            Ok(0) => {}
+            Ok(size) => {
+                let frame = &read_buffer[..size];
+                match process_client_handshake_frame(wire_codec, frame) {
+                    Ok(Some(response)) => {
+                        if let Err(error) = pools.anonymous.mark_helloed_now(connection_id) {
+                            logger.warn(
+                                Some("main::wire"),
+                                &format!("failed to mark hello timestamp: {error}"),
+                            );
+                            continue;
+                        }
+
+                        match connection.try_write(&response) {
+                            Ok(written) if written == response.len() => {
+                                logger.info(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "HELLO handshake completed for anonymous connection {}",
+                                        connection_id
+                                    ),
+                                );
+                            }
+                            Ok(written) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "partial HI response write on connection {connection_id}: wrote {written} of {} bytes",
+                                        response.len()
+                                    ),
+                                );
+                            }
+                            Err(error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to write HI response to connection {connection_id}: {error}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        logger.warn(
+                            Some("main::wire"),
+                            &format!(
+                                "protocol error on anonymous connection {connection_id}: {error}; closing connection"
+                            ),
+                        );
+                        let _ = pools.terminate_anonymous(
+                            connection_id,
+                            Some(format!("wire protocol error: {error}")),
+                        );
+                    }
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) => {
+                logger.warn(
+                    Some("main::wire"),
+                    &format!(
+                        "read error on anonymous connection {connection_id}: {error}; closing connection"
+                    ),
+                );
+                let _ = pools.terminate_anonymous(
+                    connection_id,
+                    Some(format!("socket read error: {error}")),
+                );
+            }
+        }
+    }
 }
