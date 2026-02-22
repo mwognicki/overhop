@@ -57,6 +57,12 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 19. Queue orchestration queue pool base abstractions live in `src/orchestrator/queues/mod.rs`:
    - Queue names must remain unique in pool registration.
    - Queue state pause/resume and bootstrap status must be serializable/restorable.
+20. Jobs orchestration base abstractions live in `src/orchestrator/jobs/mod.rs`:
+   - New jobs must target an already registered queue by name.
+   - Job IDs must follow `<queue-name>:<job-uuid>` while enqueue API returns the generated job UUID.
+   - Default new-job status is `new`, and execution start timestamp must be `scheduled_at` or immediate time.
+   - Optional retry interval must be strictly positive when provided.
+   - Successful enqueue must trigger immediate persistence through storage backend integration points.
 
 ## Intent
 
