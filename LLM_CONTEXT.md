@@ -31,6 +31,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep TOML as the default config source.
    - Keep argv overrides generic using dotted key paths (`--section.key value`) without hardcoded flag mappings.
    - Keep config discovery precedence: `<binary-dir>/config.toml`, then `$HOME/.overhop/config.toml`, then `/etc/overhop/config.toml`.
+13. Heartbeat is implemented in `src/heartbeat/mod.rs`:
+   - Keep interval bounds strict (`100..=1000` ms, default `1000`).
+   - Preserve stable initiation timestamp semantics for listener-side diff calculations.
 
 ## Intent
 
