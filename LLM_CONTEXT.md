@@ -92,7 +92,13 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - On first run, persist and preload `_system` queue.
    - Queue pool mutations must persist first, then reload in-memory pool from persistence.
    - On shutdown, queue state should be explicitly persisted/flushed before process exit.
-25. Runtime platform and startup cosmetics:
+25. Diagnostics are implemented in `src/diagnostics/mod.rs`:
+   - Keep diagnostics categories split into dedicated functions (application, memory, pools, storage, queues).
+   - Keep wire-facing diagnostics payload assembly centralized in diagnostics module, not inside protocol handlers.
+26. Worker STATUS wire flow:
+   - Registered workers may use STATUS (`t=10`, empty payload) to request runtime diagnostics snapshot.
+   - STATUS success response should return diagnostics categories under generic OK payload; failures should return ERR.
+27. Runtime platform and startup cosmetics:
    - Overhop runtime target is POSIX (`unix`) only.
    - Startup must print the hardcoded decorative banner verbatim before subsystem initialization.
    - Startup banner footer should include app/version/build-date metadata, short description, and MIT liability disclaimer text.

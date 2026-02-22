@@ -186,6 +186,22 @@ Failure mode:
 
 - returns `ERR` (`t=102`) if queue already exists or persistence fails
 
+### STATUS (worker client -> server)
+
+- Message type: `t=10`
+- Allowed only for registered workers.
+- Payload: must be an empty map.
+
+Response:
+
+- success: `OK` (`t=101`) payload with diagnostics categories:
+  - `application`
+  - `memory`
+  - `pools`
+  - `storage`
+  - `queues`
+- failure: `ERR` (`t=102`) with diagnostics error details
+
 ## Implemented Worker Subscription Flow
 
 ### SUBSCRIBE (worker client -> server)

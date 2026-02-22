@@ -15,6 +15,7 @@ pub const SUBSCRIBE_MESSAGE_TYPE: i64 = 6;
 pub const UNSUBSCRIBE_MESSAGE_TYPE: i64 = 7;
 pub const CREDIT_MESSAGE_TYPE: i64 = 8;
 pub const ADDQUEUE_MESSAGE_TYPE: i64 = 9;
+pub const STATUS_MESSAGE_TYPE: i64 = 10;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -51,6 +52,7 @@ pub enum WorkerProtocolAction {
         subscription_id: Uuid,
         credits: u32,
     },
+    StatusRequested { request_id: String },
 }
 
 #[derive(Debug)]
@@ -367,11 +369,25 @@ pub fn evaluate_worker_client_frame(
             });
         }
 
+        if envelope.message_type == STATUS_MESSAGE_TYPE {
+            if !envelope.payload.is_empty() {
+                return Err(SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "STATUS payload must be an empty map".to_owned(),
+                });
+            }
+
+            return Ok(WorkerProtocolAction::StatusRequested {
+                request_id: envelope.request_id,
+            });
+        }
+
         return Err(SessionError::ProtocolViolation {
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
             message:
-                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, or ADDQUEUE"
+                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, or STATUS"
                     .to_owned(),
         });
     }
@@ -471,7 +487,8 @@ mod tests {
     use super::{
         ADDQUEUE_MESSAGE_TYPE, AnonymousProtocolAction, CREDIT_MESSAGE_TYPE, IDENT_MESSAGE_TYPE,
         LSQUEUE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE,
-        PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, WorkerProtocolAction,
+        PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE,
+        WorkerProtocolAction,
         UNSUBSCRIBE_MESSAGE_TYPE,
         build_ident_frame, build_pong_frame, build_protocol_error_frame,
         evaluate_anonymous_client_frame, evaluate_worker_client_frame,
@@ -867,6 +884,38 @@ mod tests {
 
         let err = evaluate_worker_client_frame(&codec, &frame)
             .expect_err("zero credit should be rejected");
+        assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
+    }
+
+    #[test]
+    fn worker_status_requires_empty_payload() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let status = crate::wire::envelope::WireEnvelope::new(
+            STATUS_MESSAGE_TYPE,
+            "rid-status",
+            PayloadMap::new(),
+        );
+        let status_frame = codec
+            .encode_frame(&status.into_raw())
+            .expect("status should encode");
+        let action =
+            evaluate_worker_client_frame(&codec, &status_frame).expect("status should pass");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::StatusRequested {
+                request_id: "rid-status".to_owned(),
+            }
+        );
+
+        let mut payload = PayloadMap::new();
+        payload.insert("unexpected".to_owned(), rmpv::Value::Boolean(true));
+        let bad_status =
+            crate::wire::envelope::WireEnvelope::new(STATUS_MESSAGE_TYPE, "rid-bad", payload);
+        let bad_status_frame = codec
+            .encode_frame(&bad_status.into_raw())
+            .expect("status should encode");
+        let err = evaluate_worker_client_frame(&codec, &bad_status_frame)
+            .expect_err("non-empty status payload should fail");
         assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
     }
 }

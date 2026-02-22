@@ -1,4 +1,5 @@
 mod config;
+mod diagnostics;
 mod events;
 mod heartbeat;
 mod logging;
@@ -16,6 +17,7 @@ use std::{io, thread};
 
 use chrono::{DateTime, Utc};
 use config::AppConfig;
+use diagnostics::build_status_payload;
 use events::EventEmitter;
 use heartbeat::{HEARTBEAT_EVENT, Heartbeat};
 use logging::{LogLevel, Logger, LoggerConfig};
@@ -37,6 +39,7 @@ use wire::session::{
 fn main() {
     ensure_posix_or_exit();
     print_startup_banner();
+    let app_started_at = Utc::now();
 
     let app_config = load_config_or_exit();
     let log_level =
@@ -217,6 +220,7 @@ fn main() {
             logger.as_ref(),
             &storage,
             &mut persistent_queues,
+            app_started_at,
         );
         thread::sleep(Duration::from_millis(100));
     }
@@ -656,6 +660,7 @@ fn process_worker_client_messages(
     logger: &Logger,
     storage: &StorageFacade,
     persistent_queues: &mut PersistentQueuePool,
+    app_started_at: DateTime<Utc>,
 ) {
     let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
     let active_workers = pools.workers.active_connections();
@@ -985,6 +990,50 @@ fn process_worker_client_messages(
                             );
                         }
                     },
+                    Ok(WorkerProtocolAction::StatusRequested { request_id }) => {
+                        match build_status_payload(
+                            app_started_at,
+                            pools,
+                            storage,
+                            persistent_queues.queue_pool(),
+                        ) {
+                            Ok(payload) => {
+                                match wire_codec
+                                    .encode_frame(&WireEnvelope::ok(request_id, Some(payload)).into_raw())
+                                {
+                                    Ok(frame) => {
+                                        write_response_frame(
+                                            &connection,
+                                            &frame,
+                                            connection.id(),
+                                            logger,
+                                            "STATUS OK response",
+                                        );
+                                        let _ = pools.workers.touch_now(worker_id);
+                                    }
+                                    Err(error) => {
+                                        logger.warn(
+                                            Some("main::wire"),
+                                            &format!(
+                                                "failed to build STATUS response for worker {worker_id}: {error}"
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "DIAGNOSTICS_ERROR",
+                                    &format!("failed to collect diagnostics: {error}"),
+                                );
+                            }
+                        }
+                    }
                     Err(wire::session::SessionError::ProtocolViolation {
                         request_id,
                         code,
