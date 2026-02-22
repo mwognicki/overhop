@@ -40,11 +40,11 @@ jobs:
           set -euo pipefail
 
           KEEP_PATH="${RUNNER_TEMP}/overhop-self-debug-keep"
-          CLEAN_PATH="${RUNNER_TEMP}/overhop-self-debug-clean"
           REGULAR_PATH="${RUNNER_TEMP}/overhop-regular-data"
 
-          rm -rf "${KEEP_PATH}" "${CLEAN_PATH}" "${REGULAR_PATH}"
+          rm -rf "${KEEP_PATH}" "${REGULAR_PATH}"
 
+          # Run #1: self-debug creates artifacts and keeps them.
           cargo run --locked -- \
             --self-debug \
             --self-debug-keep-artifacts \
@@ -56,12 +56,15 @@ jobs:
             exit 1
           fi
 
+          # Run #2: self-debug reuses artifacts from run #1.
+          # This validates that a subsequent run can open/access existing data.
           cargo run --locked -- \
             --self-debug \
             --storage.path "${REGULAR_PATH}" \
-            --storage.self_debug_path "${CLEAN_PATH}"
+            --storage.self_debug_path "${KEEP_PATH}"
 
-          if [ -d "${CLEAN_PATH}" ]; then
-            echo "expected self-debug artifacts cleanup at ${CLEAN_PATH}"
+          # Optional side-check: without keep flag, artifacts should be cleaned.
+          if [ -d "${KEEP_PATH}" ]; then
+            echo "expected self-debug artifacts cleanup at ${KEEP_PATH}"
             exit 1
           fi
