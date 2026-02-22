@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+
+# Block direct pushes to main branch.
+if [[ "$branch" == "main" ]]; then
+  cat <<'ERR'
+ERROR: Direct pushes to 'main' are blocked.
+
+Use a topic branch and open a PR to main:
+  - feat/*
+  - quickfix/*
+  - chore/*
+ERR
+  exit 1
+fi
+
+# Enforce branch naming convention for normal branch pushes.
+if [[ ! "$branch" =~ ^(feat|quickfix|chore)/[a-z0-9._-]+$ ]]; then
+  cat <<ERR
+ERROR: Branch '$branch' does not match allowed naming.
+
+Allowed patterns:
+  feat/<topic>
+  quickfix/<topic>
+  chore/<topic>
+ERR
+  exit 1
+fi

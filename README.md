@@ -64,6 +64,21 @@ Release flow:
 3. Run `scripts/release_changelog.sh <version> <YYYY-MM-DD>`.
 4. Commit the release changelog update.
 
+## Branch and PR Flow
+
+Development should happen on topic branches and land on `main` via pull requests.
+
+- Allowed branch prefixes: `feat/*`, `quickfix/*`, `chore/*`
+- Direct pushes to `main` are disallowed by local git hook policy.
+- Open a PR from topic branch to `main` for review and merge.
+
+Typical flow:
+
+1. Create branch: `git checkout -b feat/<short-topic>` (or `quickfix/...`, `chore/...`).
+2. Implement changes and commit with changelog fragment.
+3. Push branch and open PR to `main`.
+4. Merge via PR after review.
+
 ## Architectural Philosophy
 
 This is not "AI, build me a queue system."
