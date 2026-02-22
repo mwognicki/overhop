@@ -25,7 +25,11 @@ use server::TcpServer;
 use storage::StorageFacade;
 use shutdown::ShutdownHooks;
 use wire::codec::WireCodec;
-use wire::handshake::process_client_handshake_frame;
+use wire::envelope::{PayloadMap, WireEnvelope};
+use wire::session::{
+    AnonymousProtocolAction, PROTOCOL_VIOLATION_CODE, build_protocol_error_frame,
+    evaluate_anonymous_client_frame,
+};
 
 fn main() {
     ensure_posix_or_exit();
@@ -270,8 +274,14 @@ fn process_anonymous_hello_handshakes(
             Ok(0) => {}
             Ok(size) => {
                 let frame = &read_buffer[..size];
-                match process_client_handshake_frame(wire_codec, frame) {
-                    Ok(Some(response)) => {
+                let helloed = pools
+                    .anonymous
+                    .snapshot(connection_id)
+                    .map(|snapshot| snapshot.helloed_at.is_some())
+                    .unwrap_or(false);
+
+                match evaluate_anonymous_client_frame(wire_codec, frame, helloed) {
+                    Ok(AnonymousProtocolAction::HelloAccepted { response_frame }) => {
                         if let Err(error) = pools.anonymous.mark_helloed_now(connection_id) {
                             logger.warn(
                                 Some("main::wire"),
@@ -280,46 +290,117 @@ fn process_anonymous_hello_handshakes(
                             continue;
                         }
 
-                        match connection.try_write(&response) {
-                            Ok(written) if written == response.len() => {
-                                logger.info(
-                                    Some("main::wire"),
-                                    &format!(
-                                        "HELLO handshake completed for anonymous connection {}",
-                                        connection_id
-                                    ),
-                                );
-                            }
-                            Ok(written) => {
-                                logger.warn(
-                                    Some("main::wire"),
-                                    &format!(
-                                        "partial HI response write on connection {connection_id}: wrote {written} of {} bytes",
-                                        response.len()
-                                    ),
-                                );
-                            }
+                        write_response_frame(
+                            &connection,
+                            &response_frame,
+                            connection_id,
+                            logger,
+                            "HI response",
+                        );
+                        logger.info(
+                            Some("main::wire"),
+                            &format!(
+                                "HELLO handshake completed for anonymous connection {}",
+                                connection_id
+                            ),
+                        );
+                    }
+                    Ok(AnonymousProtocolAction::RegisterRequested { request_id }) => {
+                        let worker_id = match pools
+                            .promote_anonymous_to_worker(connection_id, pools::WorkerMetadata::default())
+                        {
+                            Ok(worker_id) => worker_id,
                             Err(error) => {
                                 logger.warn(
                                     Some("main::wire"),
                                     &format!(
-                                        "failed to write HI response to connection {connection_id}: {error}"
+                                        "failed to promote anonymous connection {connection_id}: {error}"
+                                    ),
+                                );
+                                continue;
+                            }
+                        };
+
+                        let mut payload = PayloadMap::new();
+                        payload.insert(
+                            "wid".to_owned(),
+                            rmpv::Value::String(worker_id.to_string().into()),
+                        );
+                        let ok_frame = match wire_codec
+                            .encode_frame(&WireEnvelope::ok(request_id, Some(payload)).into_raw())
+                        {
+                            Ok(frame) => frame,
+                            Err(error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to encode REGISTER success response for worker {worker_id}: {error}"
+                                    ),
+                                );
+                                continue;
+                            }
+                        };
+
+                        write_response_frame(
+                            &connection,
+                            &ok_frame,
+                            connection.id(),
+                            logger,
+                            "REGISTER OK response",
+                        );
+                        logger.info(
+                            Some("main::wire"),
+                            &format!(
+                                "anonymous connection {connection_id} promoted to worker {worker_id}"
+                            ),
+                        );
+                    }
+                    Err(wire::session::SessionError::ProtocolViolation {
+                        request_id,
+                        code,
+                        message,
+                    }) => {
+                        let rid = request_id.as_deref().unwrap_or("0");
+                        match build_protocol_error_frame(wire_codec, rid, &code, &message) {
+                            Ok(error_frame) => {
+                                write_response_frame(
+                                    &connection,
+                                    &error_frame,
+                                    connection_id,
+                                    logger,
+                                    "ERR response",
+                                );
+                            }
+                            Err(build_error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to build protocol ERR response for connection {connection_id}: {build_error}"
                                     ),
                                 );
                             }
                         }
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
                         logger.warn(
                             Some("main::wire"),
                             &format!(
-                                "protocol error on anonymous connection {connection_id}: {error}; closing connection"
+                                "protocol violation on anonymous connection {connection_id}: {message}; closing connection"
                             ),
                         );
                         let _ = pools.terminate_anonymous(
                             connection_id,
-                            Some(format!("wire protocol error: {error}")),
+                            Some(format!("wire protocol violation ({PROTOCOL_VIOLATION_CODE}): {message}")),
+                        );
+                    }
+                    Err(error) => {
+                        logger.warn(
+                            Some("main::wire"),
+                            &format!(
+                                "wire session error on anonymous connection {connection_id}: {error}; closing connection"
+                            ),
+                        );
+                        let _ = pools.terminate_anonymous(
+                            connection_id,
+                            Some(format!("wire session error: {error}")),
                         );
                     }
                 }
@@ -337,6 +418,35 @@ fn process_anonymous_hello_handshakes(
                     Some(format!("socket read error: {error}")),
                 );
             }
+        }
+    }
+}
+
+fn write_response_frame(
+    connection: &Arc<server::PersistentConnection>,
+    response_frame: &[u8],
+    connection_id: u64,
+    logger: &Logger,
+    label: &str,
+) {
+    match connection.try_write(response_frame) {
+        Ok(written) if written == response_frame.len() => {}
+        Ok(written) => {
+            logger.warn(
+                Some("main::wire"),
+                &format!(
+                    "partial {label} write on connection {connection_id}: wrote {written} of {} bytes",
+                    response_frame.len()
+                ),
+            );
+        }
+        Err(error) => {
+            logger.warn(
+                Some("main::wire"),
+                &format!(
+                    "failed to write {label} to connection {connection_id}: {error}"
+                ),
+            );
         }
     }
 }

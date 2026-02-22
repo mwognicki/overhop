@@ -82,3 +82,26 @@ Generic server responses currently reserved:
 - Payload: empty map
 
 This HELLO/HI exchange is a protocol agreement sanity check between nodes.
+
+## Implemented Registration Flow
+
+### REGISTER (client -> server, anonymous only)
+
+- Message type: `t=2`
+- Allowed only after successful `HELLO -> HI`.
+- Payload: must be an empty map.
+- On success:
+  - anonymous connection is promoted to worker pool
+  - server responds with generic `OK` (`t=101`) and payload:
+    - `wid` (`string`, UUID worker id)
+- On failure:
+  - server responds with generic `ERR` (`t=102`) and closes anonymous connection
+
+## Current Anonymous Message Order Constraints
+
+For a new TCP connection (while still anonymous):
+
+1. First client message must be `HELLO` (`t=1`).
+2. After `HELLO`, the only allowed client message is `REGISTER` (`t=2`).
+
+Any order violation is treated as protocol violation.
