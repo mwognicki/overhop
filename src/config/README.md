@@ -27,6 +27,7 @@ Provide a centralized application configuration facade that loads defaults from 
   - `session.unhelloed_max_lifetime_seconds` (default `10`)
   - `session.helloed_unregistered_max_lifetime_seconds` (default `10`)
   - `session.ident_register_timeout_seconds` (default `2`)
+  - anonymous purge cadence is derived as `min` of the three `wire.session` timeout values
 - `storage` section:
   - `engine` (currently `sled`)
   - `path` (default `~/.overhop/data`, supports `~/` and `$HOME/` prefixes)

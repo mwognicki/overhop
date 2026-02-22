@@ -1,5 +1,5 @@
 ### Added
-- Added heartbeat-driven anonymous connection lifecycle enforcement (effective every 5 seconds):
+- Added heartbeat-driven anonymous connection lifecycle enforcement (cadence equals `min` of configured wire session timeouts):
   - unhelloed connection max lifetime purge
   - helloed-but-unregistered timeout handling with IDENT challenge
   - IDENT reply timeout enforcement with ERR+termination
