@@ -53,32 +53,36 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 18. Wire handshake basics live in `src/wire/handshake/mod.rs`:
    - HELLO (`t=1`) from client must produce HI (`t=103`) from server with echoed `rid` and empty payload.
    - Successful HELLO handling must update anonymous connection `helloed_at` timestamp.
-19. Connection/worker pools are implemented in `src/pools/mod.rs`:
+19. Anonymous wire session sequencing lives in `src/wire/session/mod.rs`:
+   - HELLO must be the first message on anonymous connections.
+   - After HELLO, only REGISTER (`t=2`, empty payload) is currently allowed.
+   - Successful REGISTER must promote anonymous connection to worker and respond with generic OK containing `wid`.
+20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Promotion must remove from anonymous pool and create worker with immutable UUID/promoted timestamp and mutable `last_seen_at`.
    - Worker metadata must support queue subscriptions identified by subscription UUID, with per-subscription credits counter defaulting to `0`.
    - Queue subscription mutations must validate queue existence against queue pool before attaching worker subscriptions.
-20. Queue orchestration queue pool base abstractions live in `src/orchestrator/queues/mod.rs`:
+21. Queue orchestration queue pool base abstractions live in `src/orchestrator/queues/mod.rs`:
    - Queue names must remain unique in pool registration.
    - Queue state pause/resume and bootstrap status must be serializable/restorable.
-21. Jobs orchestration base abstractions live in `src/orchestrator/jobs/mod.rs`:
+22. Jobs orchestration base abstractions live in `src/orchestrator/jobs/mod.rs`:
    - New jobs must target an already registered queue by name.
    - Job IDs must follow `<queue-name>:<job-uuid>` while enqueue API returns the generated job UUID.
    - Default new-job status is `new`, and execution start timestamp must be `scheduled_at` or immediate time.
    - Optional retry interval must be strictly positive when provided.
    - Successful enqueue must trigger immediate persistence through storage backend integration points.
-22. Storage facade is implemented in `src/storage/mod.rs`:
+23. Storage facade is implemented in `src/storage/mod.rs`:
    - Keep engine selection explicit via `AppConfig.storage.engine` (currently only `sled`).
    - Keep storage initialization fail-fast before TCP server startup.
    - Keep default data path rooted at `~/.overhop/data` with `~/` and `$HOME/` expansion support.
    - Keep engine-specific details behind storage backend abstractions so domain logic stays engine-agnostic.
    - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` for jobs).
    - Keep storage abstraction and concrete engine implementations separated into dedicated files/modules.
-23. Persistent queue bootstrap flow is implemented in `src/orchestrator/queues/persistent.rs`:
+24. Persistent queue bootstrap flow is implemented in `src/orchestrator/queues/persistent.rs`:
    - On first run, persist and preload `_system` queue.
    - Queue pool mutations must persist first, then reload in-memory pool from persistence.
    - On shutdown, queue state should be explicitly persisted/flushed before process exit.
-24. Runtime platform and startup cosmetics:
+25. Runtime platform and startup cosmetics:
    - Overhop runtime target is POSIX (`unix`) only.
    - Startup must print the hardcoded decorative banner verbatim before subsystem initialization.
    - Startup banner footer should include app/version/build-date metadata, short description, and MIT liability disclaimer text.
