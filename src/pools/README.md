@@ -19,12 +19,19 @@ Provide base in-memory pool abstractions for anonymous TCP connections and promo
   - immutable `worker_id` (UUID)
   - immutable `promoted_at`
   - mutable `last_seen_at` (defaults to `promoted_at`)
-  - metadata placeholder for queue capabilities
+  - worker subscriptions metadata
+    - `Subscription` identified by immutable UUID
+    - subscribed queue name
+    - mutable credits counter (`u32`, default `0`)
 - `ConnectionWorkerPools`
-  - coordinator facade for register/promotion/termination operations
+  - coordinator facade for register/promotion/termination and worker subscription operations
 
 ## Most Relevant Features
 
 - Promotion semantics: anonymous -> worker (single ownership transition).
 - Optional termination reason accepted for both pools (stubbed for future wire-instruction handling).
 - Best-effort socket shutdown on termination.
+- Worker subscription lifecycle APIs:
+  - subscribe worker to an existing queue (validated against queue pool)
+  - unsubscribe by worker UUID + subscription UUID
+  - add/subtract credits per subscription
