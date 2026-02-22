@@ -9,10 +9,12 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Enforces first-message and post-HELLO constraints for anonymous connections.
 - Supports REGISTER request validation and transition signaling.
 - Builds protocol violation `ERR` response frames.
+- Builds IDENT challenge frames (`t=104`) for delayed unregistered anonymous clients.
 
 ## Most Relevant Features
 
 - First anonymous message must be `HELLO`.
 - After successful `HELLO`, only `REGISTER` is currently allowed.
 - `REGISTER` payload must be empty map.
+- IDENT challenge payload includes register timeout and reply deadline metadata.
 - Exposes action-oriented result so runtime can apply pool transitions (e.g., anonymous -> worker promotion).

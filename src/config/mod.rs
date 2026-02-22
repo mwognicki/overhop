@@ -36,6 +36,25 @@ pub struct ServerConfig {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 pub struct WireConfig {
     pub max_envelope_size_bytes: u64,
+    #[serde(default)]
+    pub session: WireSessionConfig,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub struct WireSessionConfig {
+    pub unhelloed_max_lifetime_seconds: u64,
+    pub helloed_unregistered_max_lifetime_seconds: u64,
+    pub ident_register_timeout_seconds: u64,
+}
+
+impl Default for WireSessionConfig {
+    fn default() -> Self {
+        Self {
+            unhelloed_max_lifetime_seconds: 10,
+            helloed_unregistered_max_lifetime_seconds: 10,
+            ident_register_timeout_seconds: 2,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -348,6 +367,11 @@ tls_enabled = false
 
 [wire]
 max_envelope_size_bytes = 8388608
+
+[wire.session]
+unhelloed_max_lifetime_seconds = 10
+helloed_unregistered_max_lifetime_seconds = 10
+ident_register_timeout_seconds = 2
 "#,
             "default",
         );
@@ -363,6 +387,12 @@ max_envelope_size_bytes = 8388608
         assert_eq!(config.server.port, 9876);
         assert!(!config.server.tls_enabled);
         assert_eq!(config.wire.max_envelope_size_bytes, 8_388_608);
+        assert_eq!(config.wire.session.unhelloed_max_lifetime_seconds, 10);
+        assert_eq!(
+            config.wire.session.helloed_unregistered_max_lifetime_seconds,
+            10
+        );
+        assert_eq!(config.wire.session.ident_register_timeout_seconds, 2);
         assert_eq!(config.storage.engine, "sled");
         assert_eq!(config.storage.path, "~/.overhop/data");
         assert_eq!(config.storage.sled.cache_capacity, None);
@@ -387,6 +417,11 @@ tls_enabled = false
 
 [wire]
 max_envelope_size_bytes = 8388608
+
+[wire.session]
+unhelloed_max_lifetime_seconds = 10
+helloed_unregistered_max_lifetime_seconds = 10
+ident_register_timeout_seconds = 2
 
 [storage]
 engine = "sled"
@@ -414,6 +449,12 @@ path = "~/.overhop/data"
                 "false".to_owned(),
                 "--wire.max_envelope_size_bytes".to_owned(),
                 "1048576".to_owned(),
+                "--wire.session.unhelloed_max_lifetime_seconds".to_owned(),
+                "15".to_owned(),
+                "--wire.session.helloed_unregistered_max_lifetime_seconds".to_owned(),
+                "20".to_owned(),
+                "--wire.session.ident_register_timeout_seconds".to_owned(),
+                "3".to_owned(),
                 "--storage.path".to_owned(),
                 "/tmp/overhop-data".to_owned(),
             ],
@@ -428,6 +469,12 @@ path = "~/.overhop/data"
         assert_eq!(config.server.port, 9999);
         assert!(!config.server.tls_enabled);
         assert_eq!(config.wire.max_envelope_size_bytes, 1_048_576);
+        assert_eq!(config.wire.session.unhelloed_max_lifetime_seconds, 15);
+        assert_eq!(
+            config.wire.session.helloed_unregistered_max_lifetime_seconds,
+            20
+        );
+        assert_eq!(config.wire.session.ident_register_timeout_seconds, 3);
         assert_eq!(config.storage.path, "/tmp/overhop-data");
         assert_eq!(config.storage.sled.cache_capacity, None);
         assert_eq!(config.storage.sled.mode, None);
@@ -451,6 +498,11 @@ tls_enabled = false
 
 [wire]
 max_envelope_size_bytes = 8388608
+
+[wire.session]
+unhelloed_max_lifetime_seconds = 10
+helloed_unregistered_max_lifetime_seconds = 10
+ident_register_timeout_seconds = 2
 
 [storage]
 engine = "sled"

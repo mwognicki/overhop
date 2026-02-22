@@ -31,6 +31,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep TOML as the default config source.
    - Keep argv overrides generic using dotted key paths (`--section.key value`) without hardcoded flag mappings.
    - Keep config discovery precedence: `<binary-dir>/config.toml`, then `$HOME/.overhop/config.toml`, then `/etc/overhop/config.toml`.
+   - Keep wire session timeout controls configurable under `wire.session.*` keys.
 13. Heartbeat is implemented in `src/heartbeat/mod.rs`:
    - Keep interval bounds strict (`100..=1000` ms, default `1000`).
    - Preserve stable initiation timestamp semantics for listener-side diff calculations.
@@ -57,8 +58,10 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - HELLO must be the first message on anonymous connections.
    - After HELLO, only REGISTER (`t=2`, empty payload) is currently allowed.
    - Successful REGISTER must promote anonymous connection to worker and respond with generic OK containing `wid`.
+   - Stale HELLOed-but-unregistered connections must receive IDENT (`t=104`) with REGISTER reply deadline metadata.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
+   - Anonymous metadata should track optional IDENT reply deadline timestamp when IDENT challenge is issued.
    - Promotion must remove from anonymous pool and create worker with immutable UUID/promoted timestamp and mutable `last_seen_at`.
    - Worker metadata must support queue subscriptions identified by subscription UUID, with per-subscription credits counter defaulting to `0`.
    - Queue subscription mutations must validate queue existence against queue pool before attaching worker subscriptions.

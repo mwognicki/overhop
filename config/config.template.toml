@@ -24,6 +24,13 @@ tls_enabled = false
 # Maximum MessagePack envelope payload size in bytes
 # Range: 65536..=33554432
 max_envelope_size_bytes = 8388608
+[wire.session]
+# Maximum age (seconds) for a connection that still did not send HELLO
+unhelloed_max_lifetime_seconds = 10
+# Maximum age (seconds) for HELLOed anonymous connection waiting for REGISTER
+helloed_unregistered_max_lifetime_seconds = 10
+# Timeout (seconds) to send REGISTER after IDENT is issued
+ident_register_timeout_seconds = 2
 
 [storage]
 # Currently fixed to: sled
