@@ -18,8 +18,12 @@ Provide a pluggable storage facade so business/domain modules depend on stable s
   - exposes queue/job retrieval-oriented backend-agnostic operations
 - `StorageBackend`
   - trait boundary for engine-specific implementations
-- `SledStorage`
-  - current concrete backend based on `sled::Db`
+- `src/storage/sled_backend.rs`
+  - concrete `SledStorage` backend based on `sled::Db`
+- `src/storage/facade.rs`
+  - facade orchestration and engine selection
+- `src/storage/backend.rs`
+  - storage backend trait contract
 
 ## Immutable Keying Strategy
 
