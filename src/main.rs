@@ -2,6 +2,7 @@ mod config;
 mod events;
 mod heartbeat;
 mod logging;
+mod orchestrator;
 mod pools;
 mod server;
 mod shutdown;

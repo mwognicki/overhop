@@ -52,6 +52,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 18. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Promotion must remove from anonymous pool and create worker with immutable UUID/promoted timestamp and mutable `last_seen_at`.
+19. Queue orchestration queue pool base abstractions live in `src/orchestrator/queues/mod.rs`:
+   - Queue names must remain unique in pool registration.
+   - Queue state pause/resume and bootstrap status must be serializable/restorable.
 
 ## Intent
 
