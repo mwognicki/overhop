@@ -12,6 +12,7 @@
 #   --wire.session.ident_register_timeout_seconds 2
 #   --storage.engine sled
 #   --storage.path ~/.overhop/data
+#   --storage.self_debug_path ~/.overhop/data-self-debug
 #   --storage.sled.cache_capacity 1073741824
 #   --storage.sled.mode low_space
 #
@@ -55,6 +56,9 @@ ident_register_timeout_seconds = 2
 engine = "sled"
 # Default persistent data path. "~/" and "$HOME/" prefixes are supported.
 path = "~/.overhop/data"
+# Optional dedicated path for --self-debug mode.
+# If omitted, runtime derives "<storage.path>-self-debug".
+# self_debug_path = "~/.overhop/data-self-debug"
 
 [storage.sled]
 # Optional sled cache capacity in bytes (unset => sled default)

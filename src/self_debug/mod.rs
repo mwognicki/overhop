@@ -1,12 +1,14 @@
 use std::fmt;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use rmpv::Value;
 
-use crate::logging::Logger;
+use crate::config::StorageConfig;
 use crate::wire::codec::{FRAME_HEADER_SIZE_BYTES, WireCodec};
 use crate::wire::envelope::{PayloadMap, WireEnvelope};
 use crate::wire::handshake::HELLO_MESSAGE_TYPE;
@@ -72,25 +74,27 @@ pub fn extract_runtime_flags(args: Vec<String>) -> (RuntimeFlags, Vec<String>) {
     (flags, config_args)
 }
 
-pub fn start_if_enabled(
-    flags: RuntimeFlags,
-    addr: SocketAddr,
-    codec: &WireCodec,
-    logger: Arc<Logger>,
-) {
-    if !flags.enabled {
-        return;
-    }
-
-    let self_debug_codec = codec.clone();
+pub fn spawn_runner(addr: SocketAddr, codec: WireCodec) -> Receiver<Result<(), SelfDebugError>> {
+    let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        if let Err(error) = run_self_debug(addr, self_debug_codec) {
-            logger.warn(
-                Some("self_debug"),
-                &format!("self-debug mode failed: {error}"),
-            );
-        }
+        let result = run_self_debug(addr, codec);
+        let _ = tx.send(result);
     });
+    rx
+}
+
+pub fn resolve_storage_path(storage: &StorageConfig) -> String {
+    match storage.self_debug_path.as_deref() {
+        Some(path) if !path.trim().is_empty() => path.to_owned(),
+        _ => format!("{}-self-debug", storage.path),
+    }
+}
+
+pub fn cleanup_artifacts(path: &Path) -> Result<(), SelfDebugError> {
+    if path.exists() {
+        fs::remove_dir_all(path)?;
+    }
+    Ok(())
 }
 
 pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebugError> {

@@ -39,6 +39,9 @@ ident_register_timeout_seconds = 2
 engine = "sled"
 # Default local data path (supports both "~/" and "$HOME/" prefixes)
 path = "~/.overhop/data"
+# Optional dedicated path for --self-debug mode.
+# If omitted, runtime derives "<storage.path>-self-debug".
+# self_debug_path = "~/.overhop/data-self-debug"
 
 [storage.sled]
 # Optional; leave unset for sled defaults

@@ -15,6 +15,7 @@ use std::process;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{io, thread};
+use std::{path::PathBuf, sync::mpsc::TryRecvError};
 
 use chrono::{DateTime, Utc};
 use config::AppConfig;
@@ -44,7 +45,10 @@ fn main() {
 
     let runtime_args = std::env::args().skip(1).collect::<Vec<_>>();
     let (runtime_flags, config_args) = self_debug::extract_runtime_flags(runtime_args);
-    let app_config = load_config_or_exit(config_args);
+    let mut app_config = load_config_or_exit(config_args);
+    if runtime_flags.enabled {
+        app_config.storage.path = self_debug::resolve_storage_path(&app_config.storage);
+    }
     let log_level =
         LogLevel::from_config_value(&app_config.logging.level).unwrap_or_else(|| {
             eprintln!(
@@ -62,6 +66,11 @@ fn main() {
         eprintln!("storage initialization error: {error}");
         process::exit(2);
     });
+    let self_debug_artifacts_path: Option<PathBuf> = if runtime_flags.enabled {
+        Some(storage.data_path().to_path_buf())
+    } else {
+        None
+    };
     let mut persistent_queues =
         PersistentQueuePool::bootstrap(&storage, logger.as_ref()).unwrap_or_else(|error| {
             eprintln!("queue bootstrap error: {error}");
@@ -187,7 +196,12 @@ fn main() {
         "Shutdown hooks installed for SIGINT/SIGTERM",
     );
 
-    self_debug::start_if_enabled(runtime_flags, bound_addr, wire_codec.as_ref(), Arc::clone(&logger));
+    let self_debug_runner = if runtime_flags.enabled {
+        Some(self_debug::spawn_runner(bound_addr, (*wire_codec).clone()))
+    } else {
+        None
+    };
+    let mut self_debug_result: Option<Result<(), self_debug::SelfDebugError>> = None;
 
     while !shutdown_hooks.is_triggered() {
         if let Some(connection) = server.try_accept_persistent().unwrap_or_else(|error| {
@@ -227,6 +241,22 @@ fn main() {
             &mut persistent_queues,
             app_started_at,
         );
+
+        if let Some(rx) = &self_debug_runner {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self_debug_result = Some(result);
+                    break;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    self_debug_result = Some(Err(self_debug::SelfDebugError::Io(
+                        io::Error::other("self-debug runner disconnected"),
+                    )));
+                    break;
+                }
+            }
+        }
         thread::sleep(Duration::from_millis(100));
     }
 
@@ -256,7 +286,29 @@ fn main() {
     }
 
     drop(server);
+    drop(persistent_queues);
+    drop(storage);
     let _wire_codec = wire_codec;
+
+    let mut self_debug_cleanup_error: Option<self_debug::SelfDebugError> = None;
+    if let Some(path) = self_debug_artifacts_path {
+        if let Err(error) = self_debug::cleanup_artifacts(path.as_path()) {
+            self_debug_cleanup_error = Some(error);
+        }
+    }
+
+    if let Some(Err(error)) = self_debug_result {
+        if let Some(cleanup_error) = self_debug_cleanup_error {
+            eprintln!("self-debug cleanup error (after run failure): {cleanup_error}");
+        }
+        eprintln!("self-debug run failed: {error}");
+        process::exit(2);
+    }
+    if let Some(cleanup_error) = self_debug_cleanup_error {
+        eprintln!("self-debug cleanup error: {cleanup_error}");
+        process::exit(2);
+    }
+
     logger.info(
         Some("main::shutdown"),
         "TCP server stopped and shutdown completed",
