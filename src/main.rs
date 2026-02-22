@@ -2,6 +2,7 @@ mod config;
 mod events;
 mod heartbeat;
 mod logging;
+mod pools;
 mod server;
 mod shutdown;
 mod wire;
@@ -14,6 +15,7 @@ use config::AppConfig;
 use events::EventEmitter;
 use heartbeat::Heartbeat;
 use logging::{LogLevel, Logger, LoggerConfig};
+use pools::ConnectionWorkerPools;
 use serde_json::json;
 use server::TcpServer;
 use shutdown::ShutdownHooks;
@@ -77,6 +79,7 @@ fn main() {
     );
 
     let emitter = Arc::new(EventEmitter::new());
+    let pools = ConnectionWorkerPools::new();
 
     emitter.on("app.started", |event| {
         println!("sync event observed: {}", event.name);
@@ -126,13 +129,21 @@ fn main() {
             eprintln!("server accept error: {error}");
             process::exit(2);
         }) {
+            let connection_id = pools.register_anonymous(Arc::clone(&connection));
+            let anon_metadata = pools
+                .anonymous
+                .snapshot(connection_id)
+                .expect("anonymous connection should be present right after registration");
             logger.log(
                 LogLevel::Info,
                 Some("main::server"),
                 "Accepted persistent full-duplex TCP connection",
                 Some(json!({
                     "connection_id": connection.id(),
+                    "anonymous_connection_id": connection_id,
                     "peer_addr": connection.peer_addr().to_string(),
+                    "connected_at": anon_metadata.connected_at.to_rfc3339(),
+                    "helloed_at": anon_metadata.helloed_at.map(|v| v.to_rfc3339()),
                     "tls_enabled": app_config.server.tls_enabled
                 })),
             );
