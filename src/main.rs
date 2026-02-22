@@ -5,6 +5,7 @@ mod logging;
 mod orchestrator;
 mod pools;
 mod server;
+mod storage;
 mod shutdown;
 mod wire;
 
@@ -19,6 +20,7 @@ use logging::{LogLevel, Logger, LoggerConfig};
 use pools::ConnectionWorkerPools;
 use serde_json::json;
 use server::TcpServer;
+use storage::StorageFacade;
 use shutdown::ShutdownHooks;
 use wire::codec::WireCodec;
 
@@ -36,6 +38,10 @@ fn main() {
     let logger = Logger::new(LoggerConfig {
         min_level: log_level,
         human_friendly: app_config.logging.human_friendly,
+    });
+    let _storage = StorageFacade::initialize(&app_config, &logger).unwrap_or_else(|error| {
+        eprintln!("storage initialization error: {error}");
+        process::exit(2);
     });
     let server = TcpServer::from_app_config(&app_config).unwrap_or_else(|error| {
         eprintln!("server startup error: {error}");

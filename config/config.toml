@@ -7,6 +7,10 @@
 #   --server.port 9999
 #   --server.tls_enabled false
 #   --wire.max_envelope_size_bytes 1048576
+#   --storage.engine sled
+#   --storage.path ~/.overhop/data
+#   --storage.sled.cache_capacity 1073741824
+#   --storage.sled.mode low_space
 
 [logging]
 # Allowed: error, warn, info, debug, verbose
@@ -32,3 +36,16 @@ tls_enabled = false
 # Allowed range: 65536..=33554432 (64 KiB..=32 MiB)
 # Default: 8388608 (8 MiB)
 max_envelope_size_bytes = 8388608
+
+[storage]
+# Storage backend engine (currently hard-fixed to sled)
+engine = "sled"
+# Default persistent data path. "~/" and "$HOME/" prefixes are supported.
+path = "~/.overhop/data"
+
+[storage.sled]
+# Optional sled cache capacity in bytes (unset => sled default)
+# cache_capacity = 1073741824
+# Optional mode (unset => sled default)
+# Allowed: low_space, high_throughput
+# mode = "low_space"

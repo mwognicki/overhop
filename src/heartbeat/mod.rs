@@ -173,7 +173,7 @@ mod tests {
 
     use crate::config::{
         AppConfig, HeartbeatConfig as AppHeartbeatConfig, LoggingConfig,
-        ServerConfig as AppServerConfig, WireConfig,
+        ServerConfig as AppServerConfig, StorageConfig, WireConfig,
     };
     use crate::events::EventEmitter;
 
@@ -251,6 +251,7 @@ mod tests {
             wire: WireConfig {
                 max_envelope_size_bytes: 8_388_608,
             },
+            storage: StorageConfig::default(),
         };
 
         let heartbeat = Heartbeat::from_app_config(emitter, &app_config)
