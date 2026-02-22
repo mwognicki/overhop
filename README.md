@@ -6,6 +6,30 @@ A server-side queue orchestration system built in Rust — exploring strict conc
 
 This repository is both a technical project and a research log.
 
+## Table of Contents
+
+- [Why This Exists](#why-this-exists)
+- [Core Idea](#core-idea)
+- [Objectives](#objectives)
+- [Repository Navigation](#repository-navigation)
+- [Changelog and Commit Discipline](#changelog-and-commit-discipline)
+- [Branch and PR Flow](#branch-and-pr-flow)
+- [Architectural Philosophy](#architectural-philosophy)
+- [How I Work With LLMs](#how-i-work-with-llms)
+- [Where AI helps](#where-ai-helps)
+- [What stays human](#what-stays-human)
+- [How The System Works](#how-the-system-works)
+- [Strict Concurrency Enforcement](#strict-concurrency-enforcement)
+- [Server-Owned Scheduling](#server-owned-scheduling)
+- [Worker Identity](#worker-identity)
+- [The Wire Protocol](#the-wire-protocol)
+- [Storage Backend](#storage-backend)
+- [Clients](#clients)
+- [Why Rust?](#why-rust)
+- [What This Is (and Isn't)](#what-this-is-and-isnt)
+- [Contributions](#contributions)
+- [About the Author](#about-the-author)
+
 ## Why This Exists
 
 I've worked extensively with [Bull](https://github.com/OptimalBits/bull) and [BullMQ](https://docs.bullmq.io/). I genuinely like them:
@@ -38,6 +62,36 @@ No HTTP. No gRPC. A purpose-built protocol, designed incrementally alongside the
 This is an experimental project, but it's not aimed at undermining LLMs or proving they can't be trusted. The main objective is the opposite: to use LLMs in a disciplined, structured way such that Overhop could become production-ready software one day.
 
 That shapes everything about how the project is developed. It isn't a quick prototype or a throwaway research spike. It's built with proper documentation, changelogs, and CI/CD tooling from the start — because the experiment only means something if the output is something worth shipping.
+
+## Repository Navigation
+
+High-level project docs:
+
+- Main architecture/research overview: [`README.md`](README.md)
+- LLM collaboration rules: [`LLM_CONTEXT.md`](LLM_CONTEXT.md)
+- Wire protocol draft/spec: [`src/wire/PROTOCOL.md`](src/wire/PROTOCOL.md)
+- Release history: [`CHANGELOG.md`](CHANGELOG.md)
+
+Module-level docs:
+
+- Config: [`src/config/README.md`](src/config/README.md)
+- Diagnostics: [`src/diagnostics/README.md`](src/diagnostics/README.md)
+- Events: [`src/events/README.md`](src/events/README.md)
+- Heartbeat: [`src/heartbeat/README.md`](src/heartbeat/README.md)
+- Logging: [`src/logging/README.md`](src/logging/README.md)
+- Orchestrator (overview): [`src/orchestrator/README.md`](src/orchestrator/README.md)
+- Orchestrator Jobs: [`src/orchestrator/jobs/README.md`](src/orchestrator/jobs/README.md)
+- Orchestrator Queues: [`src/orchestrator/queues/README.md`](src/orchestrator/queues/README.md)
+- Pools: [`src/pools/README.md`](src/pools/README.md)
+- Self-Debug: [`src/self_debug/README.md`](src/self_debug/README.md)
+- Server: [`src/server/README.md`](src/server/README.md)
+- Shutdown: [`src/shutdown/README.md`](src/shutdown/README.md)
+- Storage: [`src/storage/README.md`](src/storage/README.md)
+- Wire (overview): [`src/wire/README.md`](src/wire/README.md)
+- Wire Codec: [`src/wire/codec/README.md`](src/wire/codec/README.md)
+- Wire Envelope: [`src/wire/envelope/README.md`](src/wire/envelope/README.md)
+- Wire Handshake: [`src/wire/handshake/README.md`](src/wire/handshake/README.md)
+- Wire Session: [`src/wire/session/README.md`](src/wire/session/README.md)
 
 ## Changelog and Commit Discipline
 
