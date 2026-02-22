@@ -45,7 +45,7 @@ jobs:
           rm -rf "${KEEP_PATH}" "${REGULAR_PATH}"
 
           # Run #1: self-debug creates artifacts and keeps them.
-          cargo run --locked -- \
+          RUSTFLAGS="-Awarnings" cargo run --locked -- \
             --self-debug \
             --self-debug-keep-artifacts \
             --storage.path "${REGULAR_PATH}" \
@@ -58,7 +58,7 @@ jobs:
 
           # Run #2: self-debug reuses artifacts from run #1.
           # This validates that a subsequent run can open/access existing data.
-          cargo run --locked -- \
+          RUSTFLAGS="-Awarnings" cargo run --locked -- \
             --self-debug \
             --storage.path "${REGULAR_PATH}" \
             --storage.self_debug_path "${KEEP_PATH}"
