@@ -888,6 +888,48 @@ fn process_worker_client_messages(
                             );
                         }
                     },
+                    Ok(WorkerProtocolAction::CreditRequested {
+                        request_id,
+                        subscription_id,
+                        credits,
+                    }) => match pools
+                        .add_worker_subscription_credits(worker_id, subscription_id, credits)
+                    {
+                        Ok(_) => match wire_codec
+                            .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                        {
+                            Ok(frame) => {
+                                write_response_frame(
+                                    &connection,
+                                    &frame,
+                                    connection.id(),
+                                    logger,
+                                    "CREDIT OK response",
+                                );
+                                let _ = pools.workers.touch_now(worker_id);
+                            }
+                            Err(error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to build CREDIT response for worker {worker_id}: {error}"
+                                    ),
+                                );
+                            }
+                        },
+                        Err(error) => {
+                            let (code, message) = map_pool_error_for_worker_error(&error);
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                code,
+                                &message,
+                            );
+                        }
+                    },
                     Err(wire::session::SessionError::ProtocolViolation {
                         request_id,
                         code,

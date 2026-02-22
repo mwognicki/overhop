@@ -20,6 +20,7 @@ Provide transport-level wire protocol building blocks while keeping framing/seri
   - includes worker `PING/PONG` request-response helpers
   - includes worker `GQUEUE/LQUEUES` query message parsing helpers
   - includes worker `SUBSCRIBE/UNSUBSCRIBE` subscription message parsing helpers
+  - includes worker `CREDIT` subscription credit increment parsing helpers
 - `PROTOCOL.md`: implementation-tracking wire protocol draft/spec.
 
 ## Extension Direction

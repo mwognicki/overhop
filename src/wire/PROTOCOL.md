@@ -202,6 +202,24 @@ Response:
 - success: empty `OK` payload
 - failure: `ERR` (`t=102`) with standard error payload
 
+### CREDIT (worker client -> server)
+
+- Message type: `t=8`
+- Allowed only for registered workers.
+- Payload:
+  - `sid` (`string`, UUID, required): subscription id
+  - `credits` (`int`, required): positive increment amount
+
+Response:
+
+- success: empty `OK` payload
+- failure: `ERR` (`t=102`) with standard error payload
+
+Rules:
+
+- worker can only credit subscriptions owned by that worker
+- decreasing credits is not allowed in this flow
+
 ## Heartbeat-Driven Connection Purge
 
 A heartbeat listener enforces anonymous lifecycle with effective cadence equal
