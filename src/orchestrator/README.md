@@ -7,6 +7,7 @@ Host queue orchestration building blocks as modular components separated from tr
 ## Current Scope
 
 - `queues`: queue registry/pool abstractions with queue lifecycle state and bootstrap tracking.
+- `queues`: queue registry/pool abstractions with queue lifecycle state and storage-backed bootstrap tracking.
 - `jobs`: queue-aware jobs pool with enqueue validation, scheduling metadata, and persistence backend hooks.
 
 ## Extension Direction

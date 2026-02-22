@@ -25,6 +25,10 @@ Provide foundational queue registry abstractions for queue orchestration with un
   - JSON snapshot serialization/deserialization
   - reconstruction from stored queues
   - explicit `mark_bootstrapped()` state
+- `PersistentQueuePool` (`persistent.rs`)
+  - bootstraps queue pool from persistence
+  - creates `_system` queue on first run
+  - enforces persist-first/reload-after mutation flow
 
 ## Most Relevant Features
 
@@ -32,3 +36,4 @@ Provide foundational queue registry abstractions for queue orchestration with un
 - Serializable queue and pool snapshot structures for storage compatibility.
 - Pause/resume state persistence through JSON snapshots.
 - Headless reconstruction helper for storage-driven bootstrapping flows.
+- Persisted bootstrap preloads queues into memory before runtime networking startup.
