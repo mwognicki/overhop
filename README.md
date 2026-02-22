@@ -79,6 +79,11 @@ Typical flow:
 3. Push branch and open PR to `main`.
 4. Merge via PR after review.
 
+PR description helpers:
+
+- Local script: `scripts/generate_pr_body_from_changelog.sh --base <base_sha> --head <head_sha> --output pr_body.md`
+- Optional GitHub Action: `PR Body From Changelog` (`.github/workflows/pr-body-from-changelog.yml`) to generate/apply PR body from changelog fragments.
+
 ## Architectural Philosophy
 
 This is not "AI, build me a queue system."

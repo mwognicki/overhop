@@ -1,0 +1,79 @@
+name: PR Body From Changelog
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to update"
+        required: true
+        type: string
+      apply:
+        description: "Apply generated body to PR"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  generate-and-apply:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve PR base/head
+        id: prmeta
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = Number(core.getInput('pr_number'));
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid pr_number: ${core.getInput('pr_number')}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            core.setOutput('number', String(pr.number));
+            core.setOutput('base_sha', pr.base.sha);
+            core.setOutput('head_sha', pr.head.sha);
+
+      - name: Generate PR body from changelog fragments
+        run: |
+          scripts/generate_pr_body_from_changelog.sh \
+            --base "${{ steps.prmeta.outputs.base_sha }}" \
+            --head "${{ steps.prmeta.outputs.head_sha }}" \
+            --output pr_body.md
+
+      - name: Show generated PR body
+        run: |
+          echo "Generated PR body:"
+          echo "----------------------------------------"
+          cat pr_body.md
+          echo "----------------------------------------"
+
+      - name: Update pull request body
+        if: ${{ inputs.apply == true }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const prNumber = Number('${{ steps.prmeta.outputs.number }}');
+            const body = fs.readFileSync('pr_body.md', 'utf8');
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              body,
+            });

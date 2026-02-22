@@ -18,6 +18,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Create and work on `feat/*`, `quickfix/*`, or `chore/*` branches.
    - Avoid direct pushes to `main`.
    - Prefer merging through PRs from topic branch to `main`.
+   - Prefer generating PR body from `.changelog/unreleased` fragments via `scripts/generate_pr_body_from_changelog.sh` (or optional workflow `.github/workflows/pr-body-from-changelog.yml`).
 9. Logging is implemented as a pluggable facade in `src/logging/mod.rs`:
    - Keep domain/business code coupled only to `Logger` API.
    - Keep output/backend details behind the `LogSink` abstraction.
