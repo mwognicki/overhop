@@ -24,6 +24,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 10. Event pub/sub is implemented as a dedicated facade in `src/events/mod.rs`:
    - Use sync listeners when failures must impact runtime flow.
    - Use async listeners for isolated background reactions.
+11. Module-level docs policy:
+   - Create `README.md` inside each new logical module directory.
+   - When a module changes meaningfully, update its module `README.md` in the same change so docs stay synchronized with code.
 
 ## Intent
 
