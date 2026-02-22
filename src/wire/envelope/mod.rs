@@ -7,6 +7,9 @@ use crate::wire::codec::MessageEnvelope;
 
 pub const PROTOCOL_VERSION: i64 = 2;
 pub const SERVER_PUSH_REQUEST_ID: &str = "0";
+pub const SERVER_MESSAGE_TYPE_MIN: i64 = 100;
+pub const SERVER_OK_MESSAGE_TYPE: i64 = 101;
+pub const SERVER_ERR_MESSAGE_TYPE: i64 = 102;
 pub const NOT_IMPLEMENTED_CODE: &str = "NOT_IMPLEMENTED";
 
 pub type PayloadMap = BTreeMap<String, Value>;
@@ -29,6 +32,8 @@ pub enum EnvelopeError {
     RequestIdRequired,
     RequestIdMustBeServerPush,
     RequestIdMismatch { expected: String, actual: String },
+    InvalidServerMessageType { actual: i64 },
+    InvalidGenericServerMessageType { actual: i64 },
 }
 
 impl fmt::Display for EnvelopeError {
@@ -54,6 +59,14 @@ impl fmt::Display for EnvelopeError {
             Self::RequestIdMismatch { expected, actual } => write!(
                 f,
                 "server response rid mismatch, expected '{expected}', actual '{actual}'"
+            ),
+            Self::InvalidServerMessageType { actual } => write!(
+                f,
+                "server-to-client message type must be > {SERVER_MESSAGE_TYPE_MIN}, got {actual}"
+            ),
+            Self::InvalidGenericServerMessageType { actual } => write!(
+                f,
+                "generic server message type must be {SERVER_OK_MESSAGE_TYPE} (OK) or {SERVER_ERR_MESSAGE_TYPE} (ERR), got {actual}"
             ),
         }
     }
@@ -135,6 +148,57 @@ impl WireEnvelope {
         Ok(())
     }
 
+    pub fn validate_server_to_client_type(&self) -> Result<(), EnvelopeError> {
+        if self.message_type <= SERVER_MESSAGE_TYPE_MIN {
+            return Err(EnvelopeError::InvalidServerMessageType {
+                actual: self.message_type,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn validate_generic_server_message_type(&self) -> Result<(), EnvelopeError> {
+        self.validate_server_to_client_type()?;
+        if self.message_type != SERVER_OK_MESSAGE_TYPE && self.message_type != SERVER_ERR_MESSAGE_TYPE {
+            return Err(EnvelopeError::InvalidGenericServerMessageType {
+                actual: self.message_type,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn ok(request_id: impl Into<String>, payload: Option<PayloadMap>) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            message_type: SERVER_OK_MESSAGE_TYPE,
+            request_id: request_id.into(),
+            payload: payload.unwrap_or_default(),
+        }
+    }
+
+    pub fn err(
+        request_id: impl Into<String>,
+        code: impl Into<String>,
+        message: Option<String>,
+        details: Option<Value>,
+    ) -> Self {
+        let mut payload = PayloadMap::new();
+        payload.insert("code".to_owned(), Value::String(code.into().into()));
+        if let Some(message) = message {
+            payload.insert("msg".to_owned(), Value::String(message.into()));
+        }
+        if let Some(details) = details {
+            payload.insert("details".to_owned(), details);
+        }
+
+        Self {
+            version: PROTOCOL_VERSION,
+            message_type: SERVER_ERR_MESSAGE_TYPE,
+            request_id: request_id.into(),
+            payload,
+        }
+    }
+
     pub fn not_implemented_error(
         request_id: impl Into<String>,
         unsupported_type: i64,
@@ -151,12 +215,18 @@ impl WireEnvelope {
             Value::Integer(unsupported_type.into()),
         );
 
-        Self {
-            version: PROTOCOL_VERSION,
-            message_type: error_message_type,
-            request_id: request_id.into(),
-            payload,
-        }
+        let mut envelope = Self::err(
+            request_id,
+            NOT_IMPLEMENTED_CODE,
+            Some("message type is not implemented".to_owned()),
+            None,
+        );
+        envelope.message_type = error_message_type;
+        envelope.payload.insert(
+            "unsupported_t".to_owned(),
+            Value::Integer(unsupported_type.into()),
+        );
+        envelope
     }
 }
 
@@ -228,7 +298,7 @@ mod tests {
 
     use super::{
         EnvelopeError, PayloadMap, WireEnvelope, NOT_IMPLEMENTED_CODE, PROTOCOL_VERSION,
-        SERVER_PUSH_REQUEST_ID,
+        SERVER_ERR_MESSAGE_TYPE, SERVER_OK_MESSAGE_TYPE, SERVER_PUSH_REQUEST_ID,
     };
 
     fn valid_raw() -> crate::wire::codec::MessageEnvelope {
@@ -336,5 +406,60 @@ mod tests {
         let decoded = WireEnvelope::from_raw(&raw).expect("envelope should decode");
 
         assert_eq!(decoded, envelope);
+    }
+
+    #[test]
+    fn builds_ok_with_default_empty_payload() {
+        let envelope = WireEnvelope::ok("rid-ok", None);
+
+        assert_eq!(envelope.version, PROTOCOL_VERSION);
+        assert_eq!(envelope.message_type, SERVER_OK_MESSAGE_TYPE);
+        assert_eq!(envelope.request_id, "rid-ok");
+        assert!(envelope.payload.is_empty());
+        assert!(envelope.validate_generic_server_message_type().is_ok());
+    }
+
+    #[test]
+    fn builds_err_with_standard_payload_fields() {
+        let envelope = WireEnvelope::err(
+            "rid-err",
+            "BAD_REQUEST",
+            Some("validation failed".to_owned()),
+            Some(Value::Map(vec![(
+                Value::String("field".into()),
+                Value::String("name".into()),
+            )])),
+        );
+
+        assert_eq!(envelope.version, PROTOCOL_VERSION);
+        assert_eq!(envelope.message_type, SERVER_ERR_MESSAGE_TYPE);
+        assert_eq!(
+            envelope.payload.get("code"),
+            Some(&Value::String("BAD_REQUEST".into()))
+        );
+        assert_eq!(
+            envelope.payload.get("msg"),
+            Some(&Value::String("validation failed".into()))
+        );
+        assert!(envelope.payload.contains_key("details"));
+        assert!(envelope.validate_generic_server_message_type().is_ok());
+    }
+
+    #[test]
+    fn generic_server_validation_rejects_other_message_types() {
+        let envelope = WireEnvelope::new(150, "rid-x", PayloadMap::new());
+        let err = envelope
+            .validate_generic_server_message_type()
+            .expect_err("non generic type should fail");
+        assert!(matches!(
+            err,
+            EnvelopeError::InvalidGenericServerMessageType { actual: 150 }
+        ));
+
+        let client_like = WireEnvelope::new(2, "rid-c", PayloadMap::new());
+        let err = client_like
+            .validate_server_to_client_type()
+            .expect_err("server type must be >100");
+        assert!(matches!(err, EnvelopeError::InvalidServerMessageType { actual: 2 }));
     }
 }
