@@ -1,5 +1,7 @@
 use std::fmt;
 
+use uuid::Uuid;
+
 use crate::wire::codec::{CodecError, WireCodec};
 use crate::wire::envelope::{EnvelopeError, WireEnvelope};
 use crate::wire::handshake::{process_client_handshake_frame, HELLO_MESSAGE_TYPE};
@@ -8,6 +10,8 @@ pub const REGISTER_MESSAGE_TYPE: i64 = 2;
 pub const PING_MESSAGE_TYPE: i64 = 3;
 pub const GQUEUE_MESSAGE_TYPE: i64 = 4;
 pub const LQUEUES_MESSAGE_TYPE: i64 = 5;
+pub const SUBSCRIBE_MESSAGE_TYPE: i64 = 6;
+pub const UNSUBSCRIBE_MESSAGE_TYPE: i64 = 7;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -25,6 +29,15 @@ pub enum WorkerProtocolAction {
     PingRequested { request_id: String },
     GetQueueRequested { request_id: String, queue_name: String },
     ListQueuesRequested { request_id: String },
+    SubscribeRequested {
+        request_id: String,
+        queue_name: String,
+        credits: u32,
+    },
+    UnsubscribeRequested {
+        request_id: String,
+        subscription_id: Uuid,
+    },
 }
 
 #[derive(Debug)]
@@ -154,11 +167,76 @@ pub fn evaluate_worker_client_frame(
             });
         }
 
+        if envelope.message_type == SUBSCRIBE_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("q")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "SUBSCRIBE payload must contain string key 'q'".to_owned(),
+                })?;
+
+            let credits = if let Some(credits_value) = envelope.payload.get("credits") {
+                let Some(raw) = credits_value.as_i64() else {
+                    return Err(SessionError::ProtocolViolation {
+                        request_id: Some(envelope.request_id.clone()),
+                        code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                        message: "SUBSCRIBE payload key 'credits' must be non-negative integer"
+                            .to_owned(),
+                    });
+                };
+                if raw < 0 || raw > u32::MAX as i64 {
+                    return Err(SessionError::ProtocolViolation {
+                        request_id: Some(envelope.request_id.clone()),
+                        code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                        message: "SUBSCRIBE payload key 'credits' must be in u32 range"
+                            .to_owned(),
+                    });
+                }
+                raw as u32
+            } else {
+                0
+            };
+
+            return Ok(WorkerProtocolAction::SubscribeRequested {
+                request_id: envelope.request_id,
+                queue_name,
+                credits,
+            });
+        }
+
+        if envelope.message_type == UNSUBSCRIBE_MESSAGE_TYPE {
+            let subscription_id_raw = envelope
+                .payload
+                .get("sid")
+                .and_then(rmpv::Value::as_str)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "UNSUBSCRIBE payload must contain string key 'sid'".to_owned(),
+                })?;
+            let subscription_id =
+                Uuid::parse_str(subscription_id_raw).map_err(|_| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "UNSUBSCRIBE payload key 'sid' must be valid UUID".to_owned(),
+                })?;
+
+            return Ok(WorkerProtocolAction::UnsubscribeRequested {
+                request_id: envelope.request_id,
+                subscription_id,
+            });
+        }
+
         return Err(SessionError::ProtocolViolation {
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
-            message: "registered workers can currently send only PING, GQUEUE, or LQUEUES"
-                .to_owned(),
+            message:
+                "registered workers can currently send only PING, GQUEUE, LQUEUES, SUBSCRIBE, or UNSUBSCRIBE"
+                    .to_owned(),
         });
     }
 
@@ -252,11 +330,13 @@ fn to_protocol_if_handshake_error(
 mod tests {
     use crate::wire::codec::CodecConfig;
     use crate::wire::envelope::PayloadMap;
+    use uuid::Uuid;
 
     use super::{
         AnonymousProtocolAction, GQUEUE_MESSAGE_TYPE, IDENT_MESSAGE_TYPE, LQUEUES_MESSAGE_TYPE,
-        PROTOCOL_VIOLATION_CODE,
+        PROTOCOL_VIOLATION_CODE, SUBSCRIBE_MESSAGE_TYPE,
         PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, WorkerProtocolAction,
+        UNSUBSCRIBE_MESSAGE_TYPE,
         build_ident_frame, build_pong_frame, build_protocol_error_frame,
         evaluate_anonymous_client_frame, evaluate_worker_client_frame,
     };
@@ -482,5 +562,90 @@ mod tests {
         let err = evaluate_worker_client_frame(&codec, &nonempty_frame)
             .expect_err("non-empty lqueues payload should fail");
         assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
+    }
+
+    #[test]
+    fn worker_subscribe_requires_q_and_accepts_optional_credits() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut payload = PayloadMap::new();
+        payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        payload.insert("credits".to_owned(), rmpv::Value::Integer(3_i64.into()));
+        let subscribe =
+            crate::wire::envelope::WireEnvelope::new(SUBSCRIBE_MESSAGE_TYPE, "rid-s", payload);
+        let frame = codec
+            .encode_frame(&subscribe.into_raw())
+            .expect("subscribe should encode");
+
+        let action =
+            evaluate_worker_client_frame(&codec, &frame).expect("subscribe should be accepted");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::SubscribeRequested {
+                request_id: "rid-s".to_owned(),
+                queue_name: "critical".to_owned(),
+                credits: 3,
+            }
+        );
+
+        let mut default_payload = PayloadMap::new();
+        default_payload.insert("q".to_owned(), rmpv::Value::String("bulk".into()));
+        let subscribe_default = crate::wire::envelope::WireEnvelope::new(
+            SUBSCRIBE_MESSAGE_TYPE,
+            "rid-s-default",
+            default_payload,
+        );
+        let frame_default = codec
+            .encode_frame(&subscribe_default.into_raw())
+            .expect("subscribe should encode");
+        let action_default = evaluate_worker_client_frame(&codec, &frame_default)
+            .expect("subscribe should accept missing credits");
+        assert_eq!(
+            action_default,
+            WorkerProtocolAction::SubscribeRequested {
+                request_id: "rid-s-default".to_owned(),
+                queue_name: "bulk".to_owned(),
+                credits: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn worker_subscribe_rejects_invalid_credits() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut payload = PayloadMap::new();
+        payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        payload.insert("credits".to_owned(), rmpv::Value::Integer((-1_i64).into()));
+        let subscribe =
+            crate::wire::envelope::WireEnvelope::new(SUBSCRIBE_MESSAGE_TYPE, "rid-bad", payload);
+        let frame = codec
+            .encode_frame(&subscribe.into_raw())
+            .expect("subscribe should encode");
+
+        let err = evaluate_worker_client_frame(&codec, &frame)
+            .expect_err("negative credits should fail");
+        assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
+    }
+
+    #[test]
+    fn worker_unsubscribe_requires_uuid_sid() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let sid = Uuid::new_v4();
+        let mut payload = PayloadMap::new();
+        payload.insert("sid".to_owned(), rmpv::Value::String(sid.to_string().into()));
+        let unsubscribe =
+            crate::wire::envelope::WireEnvelope::new(UNSUBSCRIBE_MESSAGE_TYPE, "rid-u", payload);
+        let frame = codec
+            .encode_frame(&unsubscribe.into_raw())
+            .expect("unsubscribe should encode");
+
+        let action =
+            evaluate_worker_client_frame(&codec, &frame).expect("unsubscribe should be accepted");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::UnsubscribeRequested {
+                request_id: "rid-u".to_owned(),
+                subscription_id: sid,
+            }
+        );
     }
 }
