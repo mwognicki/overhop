@@ -139,13 +139,17 @@ impl AppConfig {
             source,
         })?;
 
-        let root_value: Value =
+        let file_value: Value =
             toml_content
                 .parse()
                 .map_err(|source| ConfigError::TomlParse {
                     path: path.as_ref().to_string_lossy().to_string(),
                     source,
                 })?;
+
+        let mut root_value =
+            Value::try_from(Self::default()).map_err(ConfigError::SerializeDefaults)?;
+        merge_values(&mut root_value, file_value);
 
         Self::load_from_value_with_args(root_value, args)
     }
@@ -348,11 +352,15 @@ fn apply_override(root: &mut Value, key_path: &str, raw_value: &str) -> Result<(
         .ok_or_else(|| ConfigError::UnknownPath {
             key: key_path.to_owned(),
         })?;
-    let current_value = table
-        .get_mut(final_key)
-        .ok_or_else(|| ConfigError::UnknownPath {
+    let Some(current_value) = table.get_mut(final_key) else {
+        if key_path == "storage.self_debug_path" {
+            table.insert(final_key.to_owned(), Value::String(raw_value.to_owned()));
+            return Ok(());
+        }
+        return Err(ConfigError::UnknownPath {
             key: key_path.to_owned(),
-        })?;
+        });
+    };
 
     let parsed_value = parse_value_using_current_type(key_path, raw_value, current_value)?;
     *current_value = parsed_value;
@@ -401,6 +409,28 @@ fn parse_value_using_current_type(
             Err(ConfigError::UnsupportedOverrideType {
                 key: key_path.to_owned(),
             })
+        }
+    }
+}
+
+fn merge_values(base: &mut Value, overlay: Value) {
+    match overlay {
+        Value::Table(overlay_table) => {
+            if let Some(base_table) = base.as_table_mut() {
+                for (key, value) in overlay_table {
+                    match base_table.get_mut(&key) {
+                        Some(existing) => merge_values(existing, value),
+                        None => {
+                            base_table.insert(key, value);
+                        }
+                    }
+                }
+            } else {
+                *base = Value::Table(overlay_table);
+            }
+        }
+        other => {
+            *base = other;
         }
     }
 }
@@ -529,6 +559,8 @@ path = "~/.overhop/data"
                 "3".to_owned(),
                 "--storage.path".to_owned(),
                 "/tmp/overhop-data".to_owned(),
+                "--storage.self_debug_path".to_owned(),
+                "/tmp/overhop-data-self-debug".to_owned(),
             ],
         )
         .expect("config with overrides should load");
@@ -548,6 +580,10 @@ path = "~/.overhop/data"
         );
         assert_eq!(config.wire.session.ident_register_timeout_seconds, 3);
         assert_eq!(config.storage.path, "/tmp/overhop-data");
+        assert_eq!(
+            config.storage.self_debug_path,
+            Some("/tmp/overhop-data-self-debug".to_owned())
+        );
         assert_eq!(config.storage.sled.cache_capacity, None);
         assert_eq!(config.storage.sled.mode, None);
     }

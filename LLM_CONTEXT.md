@@ -30,6 +30,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 12. Application configuration lives in `src/config/mod.rs`:
    - Keep TOML as the default config source.
    - If `config.toml` is not found in discovery locations, fall back to built-in defaults and continue startup.
+   - Merge discovered TOML over built-in defaults before applying argv overrides so optional config keys remain overrideable.
    - Keep argv overrides generic using dotted key paths (`--section.key value`) without hardcoded flag mappings.
    - Keep config discovery precedence: `<binary-dir>/config.toml`, then `$HOME/.overhop/config.toml`, then `/etc/overhop/config.toml`.
    - Keep wire session timeout controls configurable under `wire.session.*` keys.
