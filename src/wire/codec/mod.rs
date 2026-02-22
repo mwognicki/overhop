@@ -474,6 +474,7 @@ mod tests {
             server: ServerConfig {
                 host: "127.0.0.1".to_owned(),
                 port: 9876,
+                tls_enabled: false,
             },
             wire: AppWireConfig {
                 max_envelope_size_bytes: 1_048_576,

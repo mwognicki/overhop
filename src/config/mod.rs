@@ -28,6 +28,7 @@ pub struct HeartbeatConfig {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    pub tls_enabled: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -317,6 +318,7 @@ interval_ms = 1000
 [server]
 host = "0.0.0.0"
 port = 9876
+tls_enabled = false
 
 [wire]
 max_envelope_size_bytes = 8388608
@@ -333,6 +335,7 @@ max_envelope_size_bytes = 8388608
         assert_eq!(config.heartbeat.interval_ms, 1000);
         assert_eq!(config.server.host, "0.0.0.0");
         assert_eq!(config.server.port, 9876);
+        assert!(!config.server.tls_enabled);
         assert_eq!(config.wire.max_envelope_size_bytes, 8_388_608);
     }
 
@@ -350,6 +353,7 @@ interval_ms = 1000
 [server]
 host = "0.0.0.0"
 port = 9876
+tls_enabled = false
 
 [wire]
 max_envelope_size_bytes = 8388608
@@ -370,6 +374,8 @@ max_envelope_size_bytes = 8388608
                 "127.0.0.1".to_owned(),
                 "--server.port".to_owned(),
                 "9999".to_owned(),
+                "--server.tls_enabled".to_owned(),
+                "false".to_owned(),
                 "--wire.max_envelope_size_bytes".to_owned(),
                 "1048576".to_owned(),
             ],
@@ -382,6 +388,7 @@ max_envelope_size_bytes = 8388608
         assert_eq!(config.heartbeat.interval_ms, 250);
         assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.port, 9999);
+        assert!(!config.server.tls_enabled);
         assert_eq!(config.wire.max_envelope_size_bytes, 1_048_576);
     }
 
@@ -399,6 +406,7 @@ interval_ms = 1000
 [server]
 host = "0.0.0.0"
 port = 9876
+tls_enabled = false
 
 [wire]
 max_envelope_size_bytes = 8388608

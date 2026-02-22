@@ -17,6 +17,8 @@ interval_ms = 1000
 host = "0.0.0.0"
 # TCP bind port
 port = 9876
+# TLS is not implemented yet; keep this false for now
+tls_enabled = false
 
 [wire]
 # Maximum MessagePack envelope payload size in bytes
