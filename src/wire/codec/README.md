@@ -12,7 +12,10 @@ Implement strict binary framing and MessagePack serialization for `MessageEnvelo
 
 ## Core Concepts
 
-- Max encoded payload: `8 MiB`.
+- Max encoded payload default: `8 MiB` (`8388608` bytes), configurable via `AppConfig.wire.max_envelope_size_bytes`.
+- Configurable bounds:
+  - minimum: `65536` bytes (`64 KiB`)
+  - maximum: `33554432` bytes (`32 MiB`)
 - Allowed value types (recursive):
   - int (`<= i64`)
   - string (UTF-8)

@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub logging: LoggingConfig,
     pub heartbeat: HeartbeatConfig,
     pub server: ServerConfig,
+    pub wire: WireConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -27,6 +28,11 @@ pub struct HeartbeatConfig {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub struct WireConfig {
+    pub max_envelope_size_bytes: u64,
 }
 
 impl AppConfig {
@@ -311,6 +317,9 @@ interval_ms = 1000
 [server]
 host = "0.0.0.0"
 port = 9876
+
+[wire]
+max_envelope_size_bytes = 8388608
 "#,
             "default",
         );
@@ -324,6 +333,7 @@ port = 9876
         assert_eq!(config.heartbeat.interval_ms, 1000);
         assert_eq!(config.server.host, "0.0.0.0");
         assert_eq!(config.server.port, 9876);
+        assert_eq!(config.wire.max_envelope_size_bytes, 8_388_608);
     }
 
     #[test]
@@ -340,6 +350,9 @@ interval_ms = 1000
 [server]
 host = "0.0.0.0"
 port = 9876
+
+[wire]
+max_envelope_size_bytes = 8388608
 "#,
             "override",
         );
@@ -357,6 +370,8 @@ port = 9876
                 "127.0.0.1".to_owned(),
                 "--server.port".to_owned(),
                 "9999".to_owned(),
+                "--wire.max_envelope_size_bytes".to_owned(),
+                "1048576".to_owned(),
             ],
         )
         .expect("config with overrides should load");
@@ -367,6 +382,7 @@ port = 9876
         assert_eq!(config.heartbeat.interval_ms, 250);
         assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.port, 9999);
+        assert_eq!(config.wire.max_envelope_size_bytes, 1_048_576);
     }
 
     #[test]
@@ -383,6 +399,9 @@ interval_ms = 1000
 [server]
 host = "0.0.0.0"
 port = 9876
+
+[wire]
+max_envelope_size_bytes = 8388608
 "#,
             "unknown-path",
         );

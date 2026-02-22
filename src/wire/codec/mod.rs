@@ -4,10 +4,179 @@ use std::io::Cursor;
 
 use rmpv::{Integer, Value};
 
-pub const MAX_ENVELOPE_SIZE_BYTES: usize = 8 * 1024 * 1024;
+use crate::config;
+
+pub const DEFAULT_MAX_ENVELOPE_SIZE_BYTES: usize = 8 * 1024 * 1024;
+pub const MIN_MAX_ENVELOPE_SIZE_BYTES: usize = 64 * 1024;
+pub const MAX_MAX_ENVELOPE_SIZE_BYTES: usize = 32 * 1024 * 1024;
 pub const FRAME_HEADER_SIZE_BYTES: usize = 4;
 
 pub type MessageEnvelope = BTreeMap<String, Value>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CodecConfig {
+    pub max_envelope_size_bytes: usize,
+}
+
+impl Default for CodecConfig {
+    fn default() -> Self {
+        Self {
+            max_envelope_size_bytes: DEFAULT_MAX_ENVELOPE_SIZE_BYTES,
+        }
+    }
+}
+
+impl TryFrom<config::WireConfig> for CodecConfig {
+    type Error = CodecError;
+
+    fn try_from(value: config::WireConfig) -> Result<Self, Self::Error> {
+        let raw = usize::try_from(value.max_envelope_size_bytes).map_err(|_| {
+            CodecError::InvalidConfiguredLimit {
+                value: value.max_envelope_size_bytes,
+                min: MIN_MAX_ENVELOPE_SIZE_BYTES,
+                max: MAX_MAX_ENVELOPE_SIZE_BYTES,
+            }
+        })?;
+
+        Self::new(raw)
+    }
+}
+
+impl CodecConfig {
+    pub fn new(max_envelope_size_bytes: usize) -> Result<Self, CodecError> {
+        if !(MIN_MAX_ENVELOPE_SIZE_BYTES..=MAX_MAX_ENVELOPE_SIZE_BYTES)
+            .contains(&max_envelope_size_bytes)
+        {
+            return Err(CodecError::InvalidConfiguredLimit {
+                value: max_envelope_size_bytes as u64,
+                min: MIN_MAX_ENVELOPE_SIZE_BYTES,
+                max: MAX_MAX_ENVELOPE_SIZE_BYTES,
+            });
+        }
+
+        Ok(Self {
+            max_envelope_size_bytes,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct WireCodec {
+    config: CodecConfig,
+}
+
+impl Default for WireCodec {
+    fn default() -> Self {
+        Self {
+            config: CodecConfig::default(),
+        }
+    }
+}
+
+impl WireCodec {
+    pub fn new(config: CodecConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn from_app_config(app_config: &config::AppConfig) -> Result<Self, CodecError> {
+        let cfg = CodecConfig::try_from(app_config.wire)?;
+        Ok(Self::new(cfg))
+    }
+
+    pub fn max_envelope_size_bytes(&self) -> usize {
+        self.config.max_envelope_size_bytes
+    }
+
+    pub fn encode_frame(&self, envelope: &MessageEnvelope) -> Result<Vec<u8>, CodecError> {
+        let payload = self.encode_payload(envelope)?;
+
+        if payload.is_empty() {
+            return Err(CodecError::ProtocolZeroLength);
+        }
+        if payload.len() > self.config.max_envelope_size_bytes {
+            return Err(CodecError::PayloadTooLarge {
+                size: payload.len(),
+                limit: self.config.max_envelope_size_bytes,
+            });
+        }
+
+        let mut frame = Vec::with_capacity(FRAME_HEADER_SIZE_BYTES + payload.len());
+        let len = payload.len() as u32;
+        frame.extend_from_slice(&len.to_be_bytes());
+        frame.extend_from_slice(&payload);
+        Ok(frame)
+    }
+
+    pub fn decode_frame(&self, frame: &[u8]) -> Result<MessageEnvelope, CodecError> {
+        if frame.len() < FRAME_HEADER_SIZE_BYTES {
+            return Err(CodecError::FrameTooShort { size: frame.len() });
+        }
+
+        let declared_len = u32::from_be_bytes([frame[0], frame[1], frame[2], frame[3]]) as usize;
+        if declared_len == 0 {
+            return Err(CodecError::ProtocolZeroLength);
+        }
+        if declared_len > self.config.max_envelope_size_bytes {
+            return Err(CodecError::ProtocolLengthTooLarge {
+                length: declared_len,
+                limit: self.config.max_envelope_size_bytes,
+            });
+        }
+
+        let payload = &frame[FRAME_HEADER_SIZE_BYTES..];
+        if payload.len() != declared_len {
+            return Err(CodecError::FrameLengthMismatch {
+                declared: declared_len,
+                actual_payload: payload.len(),
+            });
+        }
+
+        self.decode_payload(payload)
+    }
+
+    pub fn encode_payload(&self, envelope: &MessageEnvelope) -> Result<Vec<u8>, CodecError> {
+        let mut map_pairs = Vec::with_capacity(envelope.len());
+
+        for (key, value) in envelope {
+            validate_value(value)?;
+            map_pairs.push((Value::String(key.as_str().into()), value.clone()));
+        }
+
+        let value = Value::Map(map_pairs);
+
+        let mut encoded = Vec::new();
+        rmpv::encode::write_value(&mut encoded, &value).map_err(CodecError::MessagePackEncode)?;
+
+        if encoded.len() > self.config.max_envelope_size_bytes {
+            return Err(CodecError::PayloadTooLarge {
+                size: encoded.len(),
+                limit: self.config.max_envelope_size_bytes,
+            });
+        }
+
+        Ok(encoded)
+    }
+
+    pub fn decode_payload(&self, payload: &[u8]) -> Result<MessageEnvelope, CodecError> {
+        if payload.is_empty() {
+            return Err(CodecError::ProtocolZeroLength);
+        }
+        if payload.len() > self.config.max_envelope_size_bytes {
+            return Err(CodecError::PayloadTooLarge {
+                size: payload.len(),
+                limit: self.config.max_envelope_size_bytes,
+            });
+        }
+
+        let mut cursor = Cursor::new(payload);
+        let value = rmpv::decode::read_value(&mut cursor).map_err(CodecError::MessagePackDecode)?;
+        if cursor.position() as usize != payload.len() {
+            return Err(CodecError::TrailingDataInPayload);
+        }
+
+        parse_envelope(value)
+    }
+}
 
 #[derive(Debug)]
 pub enum CodecError {
@@ -24,6 +193,7 @@ pub enum CodecError {
     FloatNotAllowed,
     ExtensionTypeNotAllowed,
     IntegerOutOfRange,
+    InvalidConfiguredLimit { value: u64, min: usize, max: usize },
 }
 
 impl fmt::Display for CodecError {
@@ -32,7 +202,9 @@ impl fmt::Display for CodecError {
             Self::PayloadTooLarge { size, limit } => {
                 write!(f, "payload size {size} exceeds limit {limit}")
             }
-            Self::FrameTooShort { size } => write!(f, "frame size {size} is smaller than 4-byte header"),
+            Self::FrameTooShort { size } => {
+                write!(f, "frame size {size} is smaller than 4-byte header")
+            }
             Self::FrameLengthMismatch {
                 declared,
                 actual_payload,
@@ -57,6 +229,10 @@ impl fmt::Display for CodecError {
                 write!(f, "MessagePack extension values are not allowed")
             }
             Self::IntegerOutOfRange => write!(f, "integer value must fit in signed int64"),
+            Self::InvalidConfiguredLimit { value, min, max } => write!(
+                f,
+                "invalid configured wire max envelope size {value}, expected range {min}..={max} bytes"
+            ),
         }
     }
 }
@@ -64,93 +240,19 @@ impl fmt::Display for CodecError {
 impl std::error::Error for CodecError {}
 
 pub fn encode_frame(envelope: &MessageEnvelope) -> Result<Vec<u8>, CodecError> {
-    let payload = encode_payload(envelope)?;
-
-    if payload.is_empty() {
-        return Err(CodecError::ProtocolZeroLength);
-    }
-    if payload.len() > MAX_ENVELOPE_SIZE_BYTES {
-        return Err(CodecError::PayloadTooLarge {
-            size: payload.len(),
-            limit: MAX_ENVELOPE_SIZE_BYTES,
-        });
-    }
-
-    let mut frame = Vec::with_capacity(FRAME_HEADER_SIZE_BYTES + payload.len());
-    let len = payload.len() as u32;
-    frame.extend_from_slice(&len.to_be_bytes());
-    frame.extend_from_slice(&payload);
-    Ok(frame)
+    WireCodec::default().encode_frame(envelope)
 }
 
 pub fn decode_frame(frame: &[u8]) -> Result<MessageEnvelope, CodecError> {
-    if frame.len() < FRAME_HEADER_SIZE_BYTES {
-        return Err(CodecError::FrameTooShort { size: frame.len() });
-    }
-
-    let declared_len = u32::from_be_bytes([frame[0], frame[1], frame[2], frame[3]]) as usize;
-    if declared_len == 0 {
-        return Err(CodecError::ProtocolZeroLength);
-    }
-    if declared_len > MAX_ENVELOPE_SIZE_BYTES {
-        return Err(CodecError::ProtocolLengthTooLarge {
-            length: declared_len,
-            limit: MAX_ENVELOPE_SIZE_BYTES,
-        });
-    }
-
-    let payload = &frame[FRAME_HEADER_SIZE_BYTES..];
-    if payload.len() != declared_len {
-        return Err(CodecError::FrameLengthMismatch {
-            declared: declared_len,
-            actual_payload: payload.len(),
-        });
-    }
-
-    decode_payload(payload)
+    WireCodec::default().decode_frame(frame)
 }
 
 pub fn encode_payload(envelope: &MessageEnvelope) -> Result<Vec<u8>, CodecError> {
-    let mut map_pairs = Vec::with_capacity(envelope.len());
-
-    for (key, value) in envelope {
-        validate_value(value)?;
-        map_pairs.push((Value::String(key.as_str().into()), value.clone()));
-    }
-
-    let value = Value::Map(map_pairs);
-
-    let mut encoded = Vec::new();
-    rmpv::encode::write_value(&mut encoded, &value).map_err(CodecError::MessagePackEncode)?;
-
-    if encoded.len() > MAX_ENVELOPE_SIZE_BYTES {
-        return Err(CodecError::PayloadTooLarge {
-            size: encoded.len(),
-            limit: MAX_ENVELOPE_SIZE_BYTES,
-        });
-    }
-
-    Ok(encoded)
+    WireCodec::default().encode_payload(envelope)
 }
 
 pub fn decode_payload(payload: &[u8]) -> Result<MessageEnvelope, CodecError> {
-    if payload.is_empty() {
-        return Err(CodecError::ProtocolZeroLength);
-    }
-    if payload.len() > MAX_ENVELOPE_SIZE_BYTES {
-        return Err(CodecError::PayloadTooLarge {
-            size: payload.len(),
-            limit: MAX_ENVELOPE_SIZE_BYTES,
-        });
-    }
-
-    let mut cursor = Cursor::new(payload);
-    let value = rmpv::decode::read_value(&mut cursor).map_err(CodecError::MessagePackDecode)?;
-    if cursor.position() as usize != payload.len() {
-        return Err(CodecError::TrailingDataInPayload);
-    }
-
-    parse_envelope(value)
+    WireCodec::default().decode_payload(payload)
 }
 
 fn parse_envelope(value: Value) -> Result<MessageEnvelope, CodecError> {
@@ -216,8 +318,13 @@ fn validate_integer(number: &Integer) -> Result<(), CodecError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_frame, decode_payload, encode_frame, CodecError, MessageEnvelope,
-        MAX_ENVELOPE_SIZE_BYTES,
+        decode_frame, decode_payload, encode_frame, encode_payload, CodecConfig, CodecError,
+        MessageEnvelope,
+        WireCodec, DEFAULT_MAX_ENVELOPE_SIZE_BYTES, MAX_MAX_ENVELOPE_SIZE_BYTES,
+        MIN_MAX_ENVELOPE_SIZE_BYTES,
+    };
+    use crate::config::{
+        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig, WireConfig as AppWireConfig,
     };
     use rmpv::Value;
 
@@ -246,6 +353,13 @@ mod tests {
         assert_eq!(decoded.get("messageType"), Some(&Value::String("PING".into())));
         assert_eq!(decoded.get("requestId"), Some(&Value::Integer(42.into())));
         assert_eq!(decoded.get("ok"), Some(&Value::Boolean(true)));
+    }
+
+    #[test]
+    fn encodes_payload_directly() {
+        let envelope = sample_envelope();
+        let payload = encode_payload(&envelope).expect("payload should encode");
+        assert!(!payload.is_empty());
     }
 
     #[test]
@@ -288,7 +402,7 @@ mod tests {
 
     #[test]
     fn rejects_frame_larger_than_limit() {
-        let declared = (MAX_ENVELOPE_SIZE_BYTES as u32 + 1).to_be_bytes();
+        let declared = (DEFAULT_MAX_ENVELOPE_SIZE_BYTES as u32 + 1).to_be_bytes();
         let frame = declared.to_vec();
         let error = decode_frame(&frame).expect_err("oversized frame should fail");
 
@@ -300,7 +414,7 @@ mod tests {
         let mut envelope = MessageEnvelope::new();
         envelope.insert(
             "lockToken".to_owned(),
-            Value::Binary(vec![0x41; MAX_ENVELOPE_SIZE_BYTES + 1]),
+            Value::Binary(vec![0x41; DEFAULT_MAX_ENVELOPE_SIZE_BYTES + 1]),
         );
 
         let error = encode_frame(&envelope).expect_err("oversized payload should fail");
@@ -330,5 +444,43 @@ mod tests {
 
         let error = decode_payload(&payload).expect_err("trailing data should fail");
         assert!(matches!(error, CodecError::TrailingDataInPayload));
+    }
+
+    #[test]
+    fn accepts_configured_bound_inside_range() {
+        let config = CodecConfig::new(1_048_576).expect("valid bound should pass");
+        assert_eq!(config.max_envelope_size_bytes, 1_048_576);
+    }
+
+    #[test]
+    fn rejects_configured_bound_outside_range() {
+        let low = CodecConfig::new(MIN_MAX_ENVELOPE_SIZE_BYTES - 1)
+            .expect_err("lower-than-min should fail");
+        let high = CodecConfig::new(MAX_MAX_ENVELOPE_SIZE_BYTES + 1)
+            .expect_err("higher-than-max should fail");
+
+        assert!(matches!(low, CodecError::InvalidConfiguredLimit { .. }));
+        assert!(matches!(high, CodecError::InvalidConfiguredLimit { .. }));
+    }
+
+    #[test]
+    fn builds_from_app_config() {
+        let app_config = AppConfig {
+            logging: LoggingConfig {
+                level: "debug".to_owned(),
+                human_friendly: false,
+            },
+            heartbeat: HeartbeatConfig { interval_ms: 1000 },
+            server: ServerConfig {
+                host: "127.0.0.1".to_owned(),
+                port: 9876,
+            },
+            wire: AppWireConfig {
+                max_envelope_size_bytes: 1_048_576,
+            },
+        };
+
+        let codec = WireCodec::from_app_config(&app_config).expect("codec should build");
+        assert_eq!(codec.max_envelope_size_bytes(), 1_048_576);
     }
 }
