@@ -21,7 +21,7 @@ use heartbeat::{HEARTBEAT_EVENT, Heartbeat};
 use logging::{LogLevel, Logger, LoggerConfig};
 use orchestrator::queues::{Queue, QueueState};
 use orchestrator::queues::persistent::PersistentQueuePool;
-use pools::ConnectionWorkerPools;
+use pools::{ConnectionWorkerPools, PoolError};
 use serde_json::json;
 use server::TcpServer;
 use storage::StorageFacade;
@@ -761,6 +761,133 @@ fn process_worker_client_messages(
                             }
                         }
                     }
+                    Ok(WorkerProtocolAction::SubscribeRequested {
+                        request_id,
+                        queue_name,
+                        credits,
+                    }) => {
+                        if queue_pool.get_queue(&queue_name).is_none() {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "QUEUE_NOT_FOUND",
+                                &format!("queue '{queue_name}' not found"),
+                            );
+                            continue;
+                        }
+
+                        match pools.subscribe_worker_to_queue(worker_id, &queue_name, queue_pool) {
+                            Ok(subscription_id) => {
+                                if credits > 0 {
+                                    if let Err(error) = pools.add_worker_subscription_credits(
+                                        worker_id,
+                                        subscription_id,
+                                        credits,
+                                    ) {
+                                        let _ = pools.unsubscribe_worker_from_queue(
+                                            worker_id,
+                                            subscription_id,
+                                        );
+                                        let (code, message) = map_pool_error_for_worker_error(&error);
+                                        let _ = send_worker_protocol_error(
+                                            wire_codec,
+                                            logger,
+                                            &connection,
+                                            worker_id,
+                                            &request_id,
+                                            code,
+                                            &message,
+                                        );
+                                        continue;
+                                    }
+                                }
+
+                                let mut payload = PayloadMap::new();
+                                payload.insert(
+                                    "sid".to_owned(),
+                                    rmpv::Value::String(subscription_id.to_string().into()),
+                                );
+                                match wire_codec.encode_frame(
+                                    &WireEnvelope::ok(request_id, Some(payload)).into_raw(),
+                                ) {
+                                    Ok(frame) => {
+                                        write_response_frame(
+                                            &connection,
+                                            &frame,
+                                            connection.id(),
+                                            logger,
+                                            "SUBSCRIBE OK response",
+                                        );
+                                        let _ = pools.workers.touch_now(worker_id);
+                                    }
+                                    Err(error) => {
+                                        logger.warn(
+                                            Some("main::wire"),
+                                            &format!(
+                                                "failed to build SUBSCRIBE response for worker {worker_id}: {error}"
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                let (code, message) = map_pool_error_for_worker_error(&error);
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    code,
+                                    &message,
+                                );
+                            }
+                        }
+                    }
+                    Ok(WorkerProtocolAction::UnsubscribeRequested {
+                        request_id,
+                        subscription_id,
+                    }) => match pools.unsubscribe_worker_from_queue(worker_id, subscription_id) {
+                        Ok(()) => {
+                            match wire_codec
+                                .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                            {
+                                Ok(frame) => {
+                                    write_response_frame(
+                                        &connection,
+                                        &frame,
+                                        connection.id(),
+                                        logger,
+                                        "UNSUBSCRIBE OK response",
+                                    );
+                                    let _ = pools.workers.touch_now(worker_id);
+                                }
+                                Err(error) => {
+                                    logger.warn(
+                                        Some("main::wire"),
+                                        &format!(
+                                            "failed to build UNSUBSCRIBE response for worker {worker_id}: {error}"
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            let (code, message) = map_pool_error_for_worker_error(&error);
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                code,
+                                &message,
+                            );
+                        }
+                    },
                     Err(wire::session::SessionError::ProtocolViolation {
                         request_id,
                         code,
@@ -818,6 +945,61 @@ fn process_worker_client_messages(
                 let _ = pools.terminate_worker(worker_id, Some(format!("socket read error: {error}")));
             }
         }
+    }
+}
+
+fn send_worker_protocol_error(
+    wire_codec: &WireCodec,
+    logger: &Logger,
+    connection: &Arc<server::PersistentConnection>,
+    worker_id: uuid::Uuid,
+    request_id: &str,
+    code: &str,
+    message: &str,
+) -> bool {
+    match build_protocol_error_frame(wire_codec, request_id, code, message) {
+        Ok(error_frame) => {
+            write_response_frame(connection, &error_frame, connection.id(), logger, "ERR response")
+        }
+        Err(build_error) => {
+            logger.warn(
+                Some("main::wire"),
+                &format!("failed to build worker ERR for worker {worker_id}: {build_error}"),
+            );
+            false
+        }
+    }
+}
+
+fn map_pool_error_for_worker_error(error: &PoolError) -> (&'static str, String) {
+    match error {
+        PoolError::QueueNotFound { queue_name } => {
+            ("QUEUE_NOT_FOUND", format!("queue '{queue_name}' not found"))
+        }
+        PoolError::DuplicateSubscriptionForQueue { queue_name, .. } => (
+            "DUPLICATE_SUBSCRIPTION",
+            format!("worker already subscribed to queue '{queue_name}'"),
+        ),
+        PoolError::SubscriptionNotFound { subscription_id, .. } => (
+            "SUBSCRIPTION_NOT_FOUND",
+            format!("subscription '{subscription_id}' not found for worker"),
+        ),
+        PoolError::WorkerNotFound { worker_id } => (
+            "WORKER_NOT_FOUND",
+            format!("worker '{worker_id}' not found in worker pool"),
+        ),
+        PoolError::InvalidCreditDelta { amount } => (
+            "INVALID_CREDITS",
+            format!("invalid credit delta '{amount}'"),
+        ),
+        PoolError::InsufficientCredits { .. } => (
+            "INSUFFICIENT_CREDITS",
+            "not enough credits for requested subtraction".to_owned(),
+        ),
+        PoolError::AnonymousConnectionNotFound { connection_id } => (
+            "ANONYMOUS_CONNECTION_NOT_FOUND",
+            format!("anonymous connection '{connection_id}' not found"),
+        ),
     }
 }
 

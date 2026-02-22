@@ -11,7 +11,8 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Builds protocol violation `ERR` response frames.
 - Builds IDENT challenge frames (`t=104`) for delayed unregistered anonymous clients.
 - Supports worker-side PING request validation and PONG response frame construction.
-  - Supports worker queue query requests (`GQUEUE`, `LQUEUES`) parsing/validation.
+- Supports worker queue query requests (`GQUEUE`, `LQUEUES`) parsing/validation.
+- Supports worker subscription flow requests (`SUBSCRIBE`, `UNSUBSCRIBE`) parsing/validation.
 
 ## Most Relevant Features
 
@@ -22,4 +23,6 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Worker `PING` payload must be empty map, and `PONG` includes server timestamp.
 - Worker `GQUEUE` payload must include queue name under `q`.
 - Worker `LQUEUES` payload must be empty and returns full queue list metadata.
+- Worker `SUBSCRIBE` payload must include queue name under `q`, with optional non-negative `credits`.
+- Worker `UNSUBSCRIBE` payload must include `sid` as UUID string.
 - Exposes action-oriented result so runtime can apply pool transitions (e.g., anonymous -> worker promotion).

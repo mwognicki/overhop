@@ -168,6 +168,40 @@ Response (`OK`, `t=101`):
 - payload contains all queues metadata under `queues` array
 - no pagination/cap applied (full list always returned)
 
+## Implemented Worker Subscription Flow
+
+### SUBSCRIBE (worker client -> server)
+
+- Message type: `t=6`
+- Allowed only for registered workers.
+- Payload:
+  - `q` (`string`, required): queue name
+  - `credits` (`int`, optional): non-negative starting credits (default `0`)
+
+Response:
+
+- success: `OK` (`t=101`) with payload containing:
+  - `sid` (`string`, UUID subscription id)
+- failure: `ERR` (`t=102`) with standard error payload
+
+Constraints:
+
+- queue must exist
+- worker cannot subscribe more than once to same queue
+- worker can subscribe to multiple different queues
+
+### UNSUBSCRIBE (worker client -> server)
+
+- Message type: `t=7`
+- Allowed only for registered workers.
+- Payload:
+  - `sid` (`string`, UUID, required): subscription id
+
+Response:
+
+- success: empty `OK` payload
+- failure: `ERR` (`t=102`) with standard error payload
+
 ## Heartbeat-Driven Connection Purge
 
 A heartbeat listener enforces anonymous lifecycle with effective cadence equal
