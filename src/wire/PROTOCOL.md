@@ -141,6 +141,33 @@ Any order violation is treated as protocol violation.
 `PING -> PONG` exchange is handled as blocking request-response. No other wire
 message is processed for that worker connection until `PONG` is produced.
 
+## Implemented Worker Queue Query Flow
+
+### GQUEUE (worker client -> server)
+
+- Message type: `t=4`
+- Allowed only for registered workers.
+- Payload:
+  - `q` (`string`): queue name to query
+
+Response (`OK`, `t=101`):
+
+- if queue is found:
+  - payload contains full queue metadata
+- if queue is not found:
+  - payload is empty map
+
+### LQUEUES (worker client -> server)
+
+- Message type: `t=5`
+- Allowed only for registered workers.
+- Payload: must be empty map.
+
+Response (`OK`, `t=101`):
+
+- payload contains all queues metadata under `queues` array
+- no pagination/cap applied (full list always returned)
+
 ## Heartbeat-Driven Connection Purge
 
 A heartbeat listener enforces anonymous lifecycle with effective cadence equal
