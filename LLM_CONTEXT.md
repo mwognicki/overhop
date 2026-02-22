@@ -69,6 +69,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep default data path rooted at `~/.overhop/data` with `~/` and `$HOME/` expansion support.
    - Keep engine-specific details behind storage backend abstractions so domain logic stays engine-agnostic.
    - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` for jobs).
+   - Keep storage abstraction and concrete engine implementations separated into dedicated files/modules.
 22. Persistent queue bootstrap flow is implemented in `src/orchestrator/queues/persistent.rs`:
    - On first run, persist and preload `_system` queue.
    - Queue pool mutations must persist first, then reload in-memory pool from persistence.
