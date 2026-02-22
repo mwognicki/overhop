@@ -29,7 +29,8 @@ use wire::codec::WireCodec;
 use wire::envelope::{PayloadMap, WireEnvelope};
 use wire::session::{
     AnonymousProtocolAction, CONNECTION_TIMEOUT_CODE, REGISTER_TIMEOUT_CODE,
-    build_ident_frame, build_protocol_error_frame, evaluate_anonymous_client_frame,
+    WorkerProtocolAction, build_ident_frame, build_pong_frame, build_protocol_error_frame,
+    evaluate_anonymous_client_frame, evaluate_worker_client_frame,
 };
 
 fn main() {
@@ -209,6 +210,7 @@ fn main() {
             wire_codec.as_ref(),
             logger.as_ref(),
         );
+        process_worker_client_messages(pools.as_ref(), wire_codec.as_ref(), logger.as_ref());
         thread::sleep(Duration::from_millis(100));
     }
 
@@ -636,6 +638,106 @@ fn purge_stale_anonymous_connections(
                         metadata.connection_id, timeout_policy.ident_register_timeout_seconds
                     ),
                 );
+            }
+        }
+    }
+}
+
+fn process_worker_client_messages(
+    pools: &ConnectionWorkerPools,
+    wire_codec: &WireCodec,
+    logger: &Logger,
+) {
+    let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
+    let active_workers = pools.workers.active_connections();
+
+    for (worker_id, connection) in active_workers {
+        let mut read_buffer = vec![0_u8; read_buffer_len];
+        match connection.try_read(&mut read_buffer) {
+            Ok(0) => {}
+            Ok(size) => {
+                let frame = &read_buffer[..size];
+                match evaluate_worker_client_frame(wire_codec, frame) {
+                    Ok(WorkerProtocolAction::PingRequested { request_id }) => {
+                        let now_rfc3339 = Utc::now().to_rfc3339();
+                        let pong_frame =
+                            match build_pong_frame(wire_codec, &request_id, &now_rfc3339) {
+                                Ok(frame) => frame,
+                                Err(error) => {
+                                    logger.warn(
+                                        Some("main::wire"),
+                                        &format!(
+                                            "failed to build PONG response for worker {worker_id}: {error}"
+                                        ),
+                                    );
+                                    continue;
+                                }
+                            };
+
+                        write_response_frame(
+                            &connection,
+                            &pong_frame,
+                            connection.id(),
+                            logger,
+                            "PONG response",
+                        );
+                        let _ = pools.workers.touch_now(worker_id);
+                    }
+                    Err(wire::session::SessionError::ProtocolViolation {
+                        request_id,
+                        code,
+                        message,
+                    }) => {
+                        let rid = request_id.as_deref().unwrap_or("0");
+                        match build_protocol_error_frame(wire_codec, rid, &code, &message) {
+                            Ok(error_frame) => {
+                                write_response_frame(
+                                    &connection,
+                                    &error_frame,
+                                    connection.id(),
+                                    logger,
+                                    "ERR response",
+                                );
+                            }
+                            Err(build_error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to build worker protocol ERR for worker {worker_id}: {build_error}"
+                                    ),
+                                );
+                            }
+                        }
+                        logger.warn(
+                            Some("main::wire"),
+                            &format!(
+                                "protocol violation from worker {worker_id}: {message}; terminating worker connection"
+                            ),
+                        );
+                        let _ = pools.terminate_worker(
+                            worker_id,
+                            Some(format!("worker protocol violation ({code}): {message}")),
+                        );
+                    }
+                    Err(error) => {
+                        logger.warn(
+                            Some("main::wire"),
+                            &format!(
+                                "worker session error on worker {worker_id}: {error}; terminating worker connection"
+                            ),
+                        );
+                        let _ = pools
+                            .terminate_worker(worker_id, Some(format!("worker session error: {error}")));
+                    }
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) => {
+                logger.warn(
+                    Some("main::wire"),
+                    &format!("read error on worker {worker_id}: {error}; terminating worker"),
+                );
+                let _ = pools.terminate_worker(worker_id, Some(format!("socket read error: {error}")));
             }
         }
     }

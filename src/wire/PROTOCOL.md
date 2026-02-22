@@ -121,6 +121,26 @@ For a new TCP connection (while still anonymous):
 
 Any order violation is treated as protocol violation.
 
+## Implemented Worker Ping Flow
+
+### PING (worker client -> server)
+
+- Message type: `t=3`
+- Allowed only for registered workers (not anonymous connections).
+- Payload: must be an empty map.
+
+### PONG (server -> worker client)
+
+- Message type: `t=105`
+- Request id: echoes `PING` request id
+- Payload:
+  - `server_time` (`string`, RFC3339 timestamp)
+
+### Ordering/Blocking Constraint
+
+`PING -> PONG` exchange is handled as blocking request-response. No other wire
+message is processed for that worker connection until `PONG` is produced.
+
 ## Heartbeat-Driven Connection Purge
 
 A heartbeat listener enforces anonymous lifecycle with effective cadence equal
