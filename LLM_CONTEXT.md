@@ -98,7 +98,11 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 26. Worker STATUS wire flow:
    - Registered workers may use STATUS (`t=10`, empty payload) to request runtime diagnostics snapshot.
    - STATUS success response should return diagnostics categories under generic OK payload; failures should return ERR.
-27. Runtime platform and startup cosmetics:
+27. Self-debug mode is implemented in `src/self_debug/mod.rs`:
+   - Runtime flag `--self-debug` enables in-process self-debug client flow against local TCP server.
+   - Keep self-debug output human-readable with clear IN/OUT separation and decoded envelope JSON payloads.
+   - Keep self-debug logic isolated from core domain and protocol handler paths.
+28. Runtime platform and startup cosmetics:
    - Overhop runtime target is POSIX (`unix`) only.
    - Startup must print the hardcoded decorative banner verbatim before subsystem initialization.
    - Startup banner footer should include app/version/build-date metadata, short description, and MIT liability disclaimer text.

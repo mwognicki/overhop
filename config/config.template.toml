@@ -1,6 +1,8 @@
 # Overhop configuration template
 # Copy this file to `config/config.toml` and adjust values.
 # Every key may be overridden through argv with dotted notation.
+# Runtime-only flags:
+#   --self-debug
 
 [logging]
 # error | warn | info | debug | verbose
