@@ -17,6 +17,7 @@ use config::AppConfig;
 use events::EventEmitter;
 use heartbeat::Heartbeat;
 use logging::{LogLevel, Logger, LoggerConfig};
+use orchestrator::queues::persistent::PersistentQueuePool;
 use pools::ConnectionWorkerPools;
 use serde_json::json;
 use server::TcpServer;
@@ -39,10 +40,24 @@ fn main() {
         min_level: log_level,
         human_friendly: app_config.logging.human_friendly,
     });
-    let _storage = StorageFacade::initialize(&app_config, &logger).unwrap_or_else(|error| {
+    let storage = StorageFacade::initialize(&app_config, &logger).unwrap_or_else(|error| {
         eprintln!("storage initialization error: {error}");
         process::exit(2);
     });
+    let persistent_queues =
+        PersistentQueuePool::bootstrap(&storage, &logger).unwrap_or_else(|error| {
+            eprintln!("queue bootstrap error: {error}");
+            process::exit(2);
+        });
+    logger.log(
+        LogLevel::Info,
+        Some("main::orchestrator"),
+        "Queue pool bootstrapped from persistence",
+        Some(json!({
+            "queues_count": persistent_queues.queue_pool().snapshot().queues.len(),
+            "includes_system_queue": persistent_queues.queue_pool().get_queue("_system").is_some()
+        })),
+    );
     let server = TcpServer::from_app_config(&app_config).unwrap_or_else(|error| {
         eprintln!("server startup error: {error}");
         process::exit(2);
@@ -164,6 +179,10 @@ fn main() {
     );
     emitter.begin_shutdown();
     heartbeat.stop().expect("heartbeat should stop");
+    if let Err(error) = persistent_queues.persist_current_state(&storage) {
+        eprintln!("queue persistence error during shutdown: {error}");
+        process::exit(2);
+    }
     server.shutdown_all_connections();
 
     let drained = emitter.wait_for_idle(Duration::from_secs(3));
