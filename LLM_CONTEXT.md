@@ -46,6 +46,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Preserve strict frame format (`u32_be length + payload`) and configurable payload bound.
    - Keep configured payload bound constrained to `65536..=33554432` bytes (default `8388608`).
    - Keep recursive type validation strict (no floats, no MessagePack extension values, map keys must be UTF-8 strings).
+17. Base wire envelope abstraction lives in `src/wire/envelope/mod.rs`:
+   - Keep fixed envelope fields (`v`, `t`, `rid`, `p`) mandatory and version fixed at `2`.
+   - Keep unknown envelope fields ignored during parsing.
 
 ## Intent
 
