@@ -4,6 +4,7 @@ mod heartbeat;
 mod logging;
 mod server;
 mod shutdown;
+mod wire;
 
 use std::process;
 use std::sync::Arc;
