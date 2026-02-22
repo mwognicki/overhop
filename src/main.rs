@@ -2,6 +2,7 @@ mod config;
 mod events;
 mod heartbeat;
 mod logging;
+mod server;
 
 use std::process;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use events::EventEmitter;
 use heartbeat::Heartbeat;
 use logging::{LogLevel, Logger, LoggerConfig};
 use serde_json::json;
+use server::TcpServer;
 
 fn main() {
     let app_config = load_config_or_exit();
@@ -28,6 +30,29 @@ fn main() {
         min_level: log_level,
         human_friendly: app_config.logging.human_friendly,
     });
+    let server = TcpServer::from_app_config(&app_config).unwrap_or_else(|error| {
+        eprintln!("server startup error: {error}");
+        process::exit(2);
+    });
+    let bound_addr = server.local_addr().unwrap_or_else(|error| {
+        eprintln!("server startup error: failed to read local address: {error}");
+        process::exit(2);
+    });
+    logger.log(
+        LogLevel::Info,
+        Some("main::server"),
+        &format!(
+            "{} v{} started non-blocking TCP server",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        ),
+        Some(json!({
+            "bind_address": bound_addr.to_string(),
+            "host": app_config.server.host,
+            "port": app_config.server.port
+        })),
+    );
+
     let emitter = Arc::new(EventEmitter::new());
 
     emitter.on("app.started", |event| {
@@ -65,6 +90,8 @@ fn main() {
             "heartbeat_interval_ms": app_config.heartbeat.interval_ms
         })),
     );
+
+    let _server = server;
 }
 
 fn load_config_or_exit() -> AppConfig {

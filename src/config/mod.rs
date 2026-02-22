@@ -9,6 +9,7 @@ use toml::Value;
 pub struct AppConfig {
     pub logging: LoggingConfig,
     pub heartbeat: HeartbeatConfig,
+    pub server: ServerConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -20,6 +21,12 @@ pub struct LoggingConfig {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 pub struct HeartbeatConfig {
     pub interval_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct ServerConfig {
+    pub host: String,
+    pub port: u16,
 }
 
 impl AppConfig {
@@ -300,6 +307,10 @@ human_friendly = false
 
 [heartbeat]
 interval_ms = 1000
+
+[server]
+host = "0.0.0.0"
+port = 9876
 "#,
             "default",
         );
@@ -311,6 +322,8 @@ interval_ms = 1000
         assert_eq!(config.logging.level, "debug");
         assert!(!config.logging.human_friendly);
         assert_eq!(config.heartbeat.interval_ms, 1000);
+        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.port, 9876);
     }
 
     #[test]
@@ -323,6 +336,10 @@ human_friendly = false
 
 [heartbeat]
 interval_ms = 1000
+
+[server]
+host = "0.0.0.0"
+port = 9876
 "#,
             "override",
         );
@@ -336,6 +353,10 @@ interval_ms = 1000
                 "true".to_owned(),
                 "--heartbeat.interval_ms".to_owned(),
                 "250".to_owned(),
+                "--server.host".to_owned(),
+                "127.0.0.1".to_owned(),
+                "--server.port".to_owned(),
+                "9999".to_owned(),
             ],
         )
         .expect("config with overrides should load");
@@ -344,6 +365,8 @@ interval_ms = 1000
         assert_eq!(config.logging.level, "info");
         assert!(config.logging.human_friendly);
         assert_eq!(config.heartbeat.interval_ms, 250);
+        assert_eq!(config.server.host, "127.0.0.1");
+        assert_eq!(config.server.port, 9999);
     }
 
     #[test]
@@ -356,6 +379,10 @@ human_friendly = false
 
 [heartbeat]
 interval_ms = 1000
+
+[server]
+host = "0.0.0.0"
+port = 9876
 "#,
             "unknown-path",
         );

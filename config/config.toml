@@ -3,6 +3,8 @@
 #   --logging.level info
 #   --logging.human_friendly true
 #   --heartbeat.interval_ms 250
+#   --server.host 127.0.0.1
+#   --server.port 9999
 
 [logging]
 # Allowed: error, warn, info, debug, verbose
@@ -14,3 +16,9 @@ human_friendly = false
 [heartbeat]
 # Allowed range: 100..=1000 milliseconds
 interval_ms = 1000
+
+[server]
+# TCP bind host
+host = "0.0.0.0"
+# TCP bind port
+port = 9876

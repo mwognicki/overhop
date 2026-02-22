@@ -164,7 +164,10 @@ mod tests {
     use chrono::SecondsFormat;
     use serde_json::Value;
 
-    use crate::config::{AppConfig, HeartbeatConfig as AppHeartbeatConfig, LoggingConfig};
+    use crate::config::{
+        AppConfig, HeartbeatConfig as AppHeartbeatConfig, LoggingConfig,
+        ServerConfig as AppServerConfig,
+    };
     use crate::events::EventEmitter;
 
     use super::{Heartbeat, HeartbeatConfig, HeartbeatError, HEARTBEAT_EVENT, MAX_INTERVAL_MS};
@@ -233,6 +236,10 @@ mod tests {
                 human_friendly: false,
             },
             heartbeat: AppHeartbeatConfig { interval_ms: 250 },
+            server: AppServerConfig {
+                host: "127.0.0.1".to_owned(),
+                port: 9876,
+            },
         };
 
         let heartbeat = Heartbeat::from_app_config(emitter, &app_config)

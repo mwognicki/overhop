@@ -11,3 +11,9 @@ human_friendly = false
 [heartbeat]
 # Milliseconds, inclusive range: 100..=1000
 interval_ms = 1000
+
+[server]
+# TCP bind host
+host = "0.0.0.0"
+# TCP bind port
+port = 9876
