@@ -15,6 +15,17 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
+    pub fn from_config_value(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "error" => Some(Self::Error),
+            "warn" | "warning" => Some(Self::Warn),
+            "info" => Some(Self::Info),
+            "debug" => Some(Self::Debug),
+            "verbose" => Some(Self::Verbose),
+            _ => None,
+        }
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Self::Error => "ERROR",
@@ -230,5 +241,13 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("[WARN]"));
         assert!(lines[1].contains("[ERROR]"));
+    }
+
+    #[test]
+    fn parses_log_level_from_config_value() {
+        assert_eq!(LogLevel::from_config_value("debug"), Some(LogLevel::Debug));
+        assert_eq!(LogLevel::from_config_value("WARNING"), Some(LogLevel::Warn));
+        assert_eq!(LogLevel::from_config_value("verbose"), Some(LogLevel::Verbose));
+        assert_eq!(LogLevel::from_config_value("unknown"), None);
     }
 }

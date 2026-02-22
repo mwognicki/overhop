@@ -27,6 +27,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 11. Module-level docs policy:
    - Create `README.md` inside each new logical module directory.
    - When a module changes meaningfully, update its module `README.md` in the same change so docs stay synchronized with code.
+12. Application configuration lives in `src/config/mod.rs`:
+   - Keep TOML as the default config source.
+   - Keep argv overrides generic using dotted key paths (`--section.key value`) without hardcoded flag mappings.
 
 ## Intent
 

@@ -26,6 +26,7 @@ Provide a lightweight, pluggable logging facade that keeps domain/business code 
 - Optional JSON payload (`serde_json::Value`) alongside message text.
 - Optional colorful level rendering in human-friendly mode.
 - Level-based filtering with predictable default behavior.
+- Config-friendly level parsing via string values (`error`, `warn`, `info`, `debug`, `verbose`).
 
 ## Extension Direction
 

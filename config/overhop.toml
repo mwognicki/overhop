@@ -1,0 +1,16 @@
+# Overhop default runtime configuration.
+# Every value can be overridden from argv using dotted keys:
+#   --logging.level info
+#   --logging.human_friendly true
+#   --heartbeat.interval_ms 250
+
+[logging]
+# Allowed: error, warn, info, debug, verbose
+level = "debug"
+# true => colorful/human-friendly output
+# false => plain output (default)
+human_friendly = false
+
+[heartbeat]
+# Allowed range: 100..=1000 milliseconds
+interval_ms = 1000
