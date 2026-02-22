@@ -7,6 +7,7 @@ use std::time::Duration;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Value};
 
+use crate::config;
 use crate::events::EventEmitter;
 
 pub const HEARTBEAT_EVENT: &str = "on-heartbeat";
@@ -22,6 +23,14 @@ impl Default for HeartbeatConfig {
     fn default() -> Self {
         Self {
             interval_ms: MAX_INTERVAL_MS,
+        }
+    }
+}
+
+impl From<config::HeartbeatConfig> for HeartbeatConfig {
+    fn from(value: config::HeartbeatConfig) -> Self {
+        Self {
+            interval_ms: value.interval_ms,
         }
     }
 }
@@ -67,6 +76,13 @@ impl Heartbeat {
             stop_signal: Arc::new(AtomicBool::new(false)),
             worker: None,
         })
+    }
+
+    pub fn from_app_config(
+        emitter: Arc<EventEmitter>,
+        app_config: &config::AppConfig,
+    ) -> Result<Self, HeartbeatError> {
+        Self::new(emitter, HeartbeatConfig::from(app_config.heartbeat))
     }
 
     pub fn start(&mut self) -> Result<(), HeartbeatError> {
@@ -148,6 +164,7 @@ mod tests {
     use chrono::SecondsFormat;
     use serde_json::Value;
 
+    use crate::config::{AppConfig, HeartbeatConfig as AppHeartbeatConfig, LoggingConfig};
     use crate::events::EventEmitter;
 
     use super::{Heartbeat, HeartbeatConfig, HeartbeatError, HEARTBEAT_EVENT, MAX_INTERVAL_MS};
@@ -205,5 +222,27 @@ mod tests {
         heartbeat.stop().expect("heartbeat should stop");
 
         assert_eq!(received, expected_initiated_at);
+    }
+
+    #[test]
+    fn constructs_from_app_config_heartbeat_section() {
+        let emitter = Arc::new(EventEmitter::new());
+        let app_config = AppConfig {
+            logging: LoggingConfig {
+                level: "debug".to_owned(),
+                human_friendly: false,
+            },
+            heartbeat: AppHeartbeatConfig { interval_ms: 250 },
+        };
+
+        let heartbeat = Heartbeat::from_app_config(emitter, &app_config)
+            .expect("heartbeat should construct from app config");
+        let payload = heartbeat.initial_metadata_payload();
+        let interval = payload
+            .get("interval_ms")
+            .and_then(Value::as_u64)
+            .expect("interval_ms should exist in payload");
+
+        assert_eq!(interval, 250);
     }
 }
