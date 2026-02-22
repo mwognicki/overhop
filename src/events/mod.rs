@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -38,6 +39,9 @@ pub enum EmitError {
         event: String,
         listener_index: usize,
     },
+    ShuttingDown {
+        event: String,
+    },
 }
 
 impl fmt::Display for EmitError {
@@ -58,16 +62,110 @@ impl fmt::Display for EmitError {
                 f,
                 "sync listener #{listener_index} panicked for event '{event}'"
             ),
+            Self::ShuttingDown { event } => {
+                write!(f, "event emitter is shutting down; refused event '{event}'")
+            }
         }
     }
 }
 
 impl Error for EmitError {}
 
-#[derive(Default)]
+#[derive(Debug, Default)]
+struct LifecycleState {
+    shutting_down: bool,
+    active_count: usize,
+}
+
+#[derive(Debug, Default)]
+struct ListenerLifecycle {
+    state: Mutex<LifecycleState>,
+    notify: Condvar,
+}
+
+impl ListenerLifecycle {
+    fn is_shutting_down(&self) -> bool {
+        self.state
+            .lock()
+            .expect("lifecycle lock poisoned")
+            .shutting_down
+    }
+
+    fn begin_shutdown(&self) {
+        let mut state = self.state.lock().expect("lifecycle lock poisoned");
+        state.shutting_down = true;
+        if state.active_count == 0 {
+            self.notify.notify_all();
+        }
+    }
+
+    fn try_start_listener(&self) -> bool {
+        let mut state = self.state.lock().expect("lifecycle lock poisoned");
+        if state.shutting_down {
+            return false;
+        }
+        state.active_count += 1;
+        true
+    }
+
+    fn finish_listener(&self) {
+        let mut state = self.state.lock().expect("lifecycle lock poisoned");
+        if state.active_count > 0 {
+            state.active_count -= 1;
+        }
+        if state.active_count == 0 {
+            self.notify.notify_all();
+        }
+    }
+
+    fn wait_for_idle(&self, timeout: Duration) -> bool {
+        let mut state = self.state.lock().expect("lifecycle lock poisoned");
+        if state.active_count == 0 {
+            return true;
+        }
+
+        let started_at = Instant::now();
+        let mut remaining = timeout;
+
+        while state.active_count > 0 {
+            let (next_state, result) = self
+                .notify
+                .wait_timeout(state, remaining)
+                .expect("lifecycle lock poisoned while waiting");
+            state = next_state;
+
+            if state.active_count == 0 {
+                return true;
+            }
+            if result.timed_out() {
+                return false;
+            }
+
+            let elapsed = started_at.elapsed();
+            if elapsed >= timeout {
+                return false;
+            }
+            remaining = timeout - elapsed;
+        }
+
+        true
+    }
+}
+
 pub struct EventEmitter {
     sync_listeners: RwLock<HashMap<String, Vec<SyncListener>>>,
     async_listeners: RwLock<HashMap<String, Vec<AsyncListener>>>,
+    lifecycle: Arc<ListenerLifecycle>,
+}
+
+impl Default for EventEmitter {
+    fn default() -> Self {
+        Self {
+            sync_listeners: RwLock::new(HashMap::new()),
+            async_listeners: RwLock::new(HashMap::new()),
+            lifecycle: Arc::new(ListenerLifecycle::default()),
+        }
+    }
 }
 
 impl EventEmitter {
@@ -107,6 +205,13 @@ impl EventEmitter {
 
     pub fn emit(&self, event_name: impl Into<String>, payload: Option<Value>) -> Result<(), EmitError> {
         let event = Event::new(event_name, payload);
+
+        if self.lifecycle.is_shutting_down() {
+            return Err(EmitError::ShuttingDown {
+                event: event.name.clone(),
+            });
+        }
+
         self.run_sync(&event)?;
         self.dispatch_async(event);
         Ok(())
@@ -114,9 +219,20 @@ impl EventEmitter {
 
     pub fn emit_or_exit(&self, event_name: impl Into<String>, payload: Option<Value>) {
         if let Err(error) = self.emit(event_name, payload) {
+            if matches!(error, EmitError::ShuttingDown { .. }) {
+                return;
+            }
             eprintln!("{error}");
             std::process::exit(1);
         }
+    }
+
+    pub fn begin_shutdown(&self) {
+        self.lifecycle.begin_shutdown();
+    }
+
+    pub fn wait_for_idle(&self, timeout: Duration) -> bool {
+        self.lifecycle.wait_for_idle(timeout)
     }
 
     fn run_sync(&self, event: &Event) -> Result<(), EmitError> {
@@ -130,7 +246,15 @@ impl EventEmitter {
         };
 
         for (idx, handler) in handlers.iter().enumerate() {
+            if !self.lifecycle.try_start_listener() {
+                return Err(EmitError::ShuttingDown {
+                    event: event.name.clone(),
+                });
+            }
+
             let result = catch_unwind(AssertUnwindSafe(|| handler(event)));
+            self.lifecycle.finish_listener();
+
             match result {
                 Ok(Ok(())) => {}
                 Ok(Err(message)) => {
@@ -163,11 +287,19 @@ impl EventEmitter {
         };
 
         for (idx, handler) in handlers.iter().enumerate() {
+            if !self.lifecycle.try_start_listener() {
+                return;
+            }
+
             let listener = Arc::clone(handler);
             let event_for_listener = event.clone();
             let event_name = event.name.clone();
+            let lifecycle = Arc::clone(&self.lifecycle);
+
             thread::spawn(move || {
                 let result = catch_unwind(AssertUnwindSafe(|| listener(event_for_listener)));
+                lifecycle.finish_listener();
+
                 match result {
                     Ok(Ok(())) => {}
                     Ok(Err(message)) => {
@@ -268,5 +400,20 @@ mod tests {
 
         let result = emitter.emit("queue.updated", None);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn shutdown_rejects_new_events() {
+        let emitter = EventEmitter::new();
+        emitter.begin_shutdown();
+
+        let result = emitter.emit("queue.updated", None);
+        assert!(matches!(result, Err(EmitError::ShuttingDown { .. })));
+    }
+
+    #[test]
+    fn wait_for_idle_returns_true_when_no_active_listeners() {
+        let emitter = EventEmitter::new();
+        assert!(emitter.wait_for_idle(Duration::from_millis(10)));
     }
 }

@@ -8,7 +8,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Value};
 
 use crate::config;
-use crate::events::EventEmitter;
+use crate::events::{EmitError, EventEmitter};
 
 pub const HEARTBEAT_EVENT: &str = "on-heartbeat";
 pub const MIN_INTERVAL_MS: u64 = 100;
@@ -109,7 +109,14 @@ impl Heartbeat {
                     "interval_ms": interval_ms
                 });
 
-                emitter.emit_or_exit(HEARTBEAT_EVENT, Some(payload));
+                match emitter.emit(HEARTBEAT_EVENT, Some(payload)) {
+                    Ok(()) => {}
+                    Err(EmitError::ShuttingDown { .. }) => break,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        std::process::exit(1);
+                    }
+                }
                 thread::sleep(Duration::from_millis(interval_ms));
             }
         }));
