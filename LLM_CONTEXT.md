@@ -40,6 +40,10 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 15. Graceful shutdown flow is coordinated via `src/shutdown/mod.rs` and `src/events/mod.rs`:
    - Handle `SIGINT`/`SIGTERM` through shutdown hooks.
    - On shutdown, prevent new listener starts and use best-effort listener drain waiting.
+16. Wire protocol codec lives in `src/wire/codec/mod.rs`:
+   - Preserve strict frame format (`u32_be length + payload`) and configurable payload bound.
+   - Keep configured payload bound constrained to `65536..=33554432` bytes (default `8388608`).
+   - Keep recursive type validation strict (no floats, no MessagePack extension values, map keys must be UTF-8 strings).
 
 ## Intent
 

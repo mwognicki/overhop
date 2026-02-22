@@ -173,7 +173,7 @@ mod tests {
 
     use crate::config::{
         AppConfig, HeartbeatConfig as AppHeartbeatConfig, LoggingConfig,
-        ServerConfig as AppServerConfig,
+        ServerConfig as AppServerConfig, WireConfig,
     };
     use crate::events::EventEmitter;
 
@@ -246,6 +246,9 @@ mod tests {
             server: AppServerConfig {
                 host: "127.0.0.1".to_owned(),
                 port: 9876,
+            },
+            wire: WireConfig {
+                max_envelope_size_bytes: 8_388_608,
             },
         };
 

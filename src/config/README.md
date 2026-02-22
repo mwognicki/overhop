@@ -21,6 +21,8 @@ Provide a centralized application configuration facade that loads defaults from 
 - `server` section:
   - `host`
   - `port`
+- `wire` section:
+  - `max_envelope_size_bytes`
 - `load_from_toml_with_args(path, args)`: loads TOML, applies argv overrides, deserializes config.
 - `load_with_discovery(args)`: discovers `config.toml` using runtime path precedence, then applies argv overrides.
 

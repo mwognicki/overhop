@@ -4,6 +4,7 @@ mod heartbeat;
 mod logging;
 mod server;
 mod shutdown;
+mod wire;
 
 use std::process;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use logging::{LogLevel, Logger, LoggerConfig};
 use serde_json::json;
 use server::TcpServer;
 use shutdown::ShutdownHooks;
+use wire::codec::WireCodec;
 
 fn main() {
     let app_config = load_config_or_exit();
@@ -52,6 +54,18 @@ fn main() {
             "bind_address": bound_addr.to_string(),
             "host": app_config.server.host,
             "port": app_config.server.port
+        })),
+    );
+    let wire_codec = WireCodec::from_app_config(&app_config).unwrap_or_else(|error| {
+        eprintln!("wire codec configuration error: {error}");
+        process::exit(2);
+    });
+    logger.log(
+        LogLevel::Info,
+        Some("main::wire"),
+        "Wire codec initialized",
+        Some(json!({
+            "max_envelope_size_bytes": wire_codec.max_envelope_size_bytes()
         })),
     );
 
@@ -125,6 +139,7 @@ fn main() {
     }
 
     drop(server);
+    let _wire_codec = wire_codec;
     logger.info(
         Some("main::shutdown"),
         "TCP server stopped and shutdown completed",

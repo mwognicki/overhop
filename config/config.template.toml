@@ -17,3 +17,8 @@ interval_ms = 1000
 host = "0.0.0.0"
 # TCP bind port
 port = 9876
+
+[wire]
+# Maximum MessagePack envelope payload size in bytes
+# Range: 65536..=33554432
+max_envelope_size_bytes = 8388608

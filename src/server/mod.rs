@@ -93,7 +93,9 @@ impl TcpServer {
 mod tests {
     use std::io::ErrorKind;
 
-    use crate::config::{AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig as AppServerConfig};
+    use crate::config::{
+        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig as AppServerConfig, WireConfig,
+    };
 
     use super::{ServerConfig, TcpServer, DEFAULT_HOST, DEFAULT_PORT};
 
@@ -131,6 +133,9 @@ mod tests {
             server: AppServerConfig {
                 host: "127.0.0.1".to_owned(),
                 port: 0,
+            },
+            wire: WireConfig {
+                max_envelope_size_bytes: 8_388_608,
             },
         };
 
