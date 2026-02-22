@@ -24,6 +24,11 @@ Provide a centralized application configuration facade that loads defaults from 
   - `tls_enabled` (currently must remain `false` until TLS transport is implemented)
 - `wire` section:
   - `max_envelope_size_bytes`
+- `storage` section:
+  - `engine` (currently `sled`)
+  - `path` (default `~/.overhop/data`, supports `~/` and `$HOME/` prefixes)
+  - `sled.cache_capacity` (optional)
+  - `sled.mode` (optional: `low_space` or `high_throughput`)
 - `load_from_toml_with_args(path, args)`: loads TOML, applies argv overrides, deserializes config.
 - `load_with_discovery(args)`: discovers `config.toml` using runtime path precedence, then applies argv overrides.
 

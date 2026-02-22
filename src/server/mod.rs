@@ -235,7 +235,8 @@ mod tests {
     use std::time::Duration;
 
     use crate::config::{
-        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig as AppServerConfig, WireConfig,
+        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig as AppServerConfig, StorageConfig,
+        WireConfig,
     };
 
     use super::{
@@ -336,6 +337,7 @@ mod tests {
             wire: WireConfig {
                 max_envelope_size_bytes: 8_388_608,
             },
+            storage: StorageConfig::default(),
         };
 
         let server = TcpServer::from_app_config(&app_config)

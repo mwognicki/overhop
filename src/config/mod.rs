@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub heartbeat: HeartbeatConfig,
     pub server: ServerConfig,
     pub wire: WireConfig,
+    #[serde(default)]
+    pub storage: StorageConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -34,6 +36,30 @@ pub struct ServerConfig {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 pub struct WireConfig {
     pub max_envelope_size_bytes: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct StorageConfig {
+    pub engine: String,
+    pub path: String,
+    #[serde(default)]
+    pub sled: SledConfig,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            engine: "sled".to_owned(),
+            path: "~/.overhop/data".to_owned(),
+            sled: SledConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Default)]
+pub struct SledConfig {
+    pub cache_capacity: Option<u64>,
+    pub mode: Option<String>,
 }
 
 impl AppConfig {
@@ -337,6 +363,10 @@ max_envelope_size_bytes = 8388608
         assert_eq!(config.server.port, 9876);
         assert!(!config.server.tls_enabled);
         assert_eq!(config.wire.max_envelope_size_bytes, 8_388_608);
+        assert_eq!(config.storage.engine, "sled");
+        assert_eq!(config.storage.path, "~/.overhop/data");
+        assert_eq!(config.storage.sled.cache_capacity, None);
+        assert_eq!(config.storage.sled.mode, None);
     }
 
     #[test]
@@ -357,6 +387,12 @@ tls_enabled = false
 
 [wire]
 max_envelope_size_bytes = 8388608
+
+[storage]
+engine = "sled"
+path = "~/.overhop/data"
+
+[storage.sled]
 "#,
             "override",
         );
@@ -378,6 +414,8 @@ max_envelope_size_bytes = 8388608
                 "false".to_owned(),
                 "--wire.max_envelope_size_bytes".to_owned(),
                 "1048576".to_owned(),
+                "--storage.path".to_owned(),
+                "/tmp/overhop-data".to_owned(),
             ],
         )
         .expect("config with overrides should load");
@@ -390,6 +428,9 @@ max_envelope_size_bytes = 8388608
         assert_eq!(config.server.port, 9999);
         assert!(!config.server.tls_enabled);
         assert_eq!(config.wire.max_envelope_size_bytes, 1_048_576);
+        assert_eq!(config.storage.path, "/tmp/overhop-data");
+        assert_eq!(config.storage.sled.cache_capacity, None);
+        assert_eq!(config.storage.sled.mode, None);
     }
 
     #[test]
@@ -410,6 +451,12 @@ tls_enabled = false
 
 [wire]
 max_envelope_size_bytes = 8388608
+
+[storage]
+engine = "sled"
+path = "~/.overhop/data"
+
+[storage.sled]
 "#,
             "unknown-path",
         );

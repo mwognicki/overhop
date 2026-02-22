@@ -24,3 +24,14 @@ tls_enabled = false
 # Maximum MessagePack envelope payload size in bytes
 # Range: 65536..=33554432
 max_envelope_size_bytes = 8388608
+
+[storage]
+# Currently fixed to: sled
+engine = "sled"
+# Default local data path (supports both "~/" and "$HOME/" prefixes)
+path = "~/.overhop/data"
+
+[storage.sled]
+# Optional; leave unset for sled defaults
+# cache_capacity = 1073741824
+# mode = "low_space" # low_space | high_throughput

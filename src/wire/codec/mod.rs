@@ -324,7 +324,8 @@ mod tests {
         MIN_MAX_ENVELOPE_SIZE_BYTES,
     };
     use crate::config::{
-        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig, WireConfig as AppWireConfig,
+        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig, StorageConfig,
+        WireConfig as AppWireConfig,
     };
     use rmpv::Value;
 
@@ -479,6 +480,7 @@ mod tests {
             wire: AppWireConfig {
                 max_envelope_size_bytes: 1_048_576,
             },
+            storage: StorageConfig::default(),
         };
 
         let codec = WireCodec::from_app_config(&app_config).expect("codec should build");

@@ -63,6 +63,11 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Default new-job status is `new`, and execution start timestamp must be `scheduled_at` or immediate time.
    - Optional retry interval must be strictly positive when provided.
    - Successful enqueue must trigger immediate persistence through storage backend integration points.
+21. Storage facade is implemented in `src/storage/mod.rs`:
+   - Keep engine selection explicit via `AppConfig.storage.engine` (currently only `sled`).
+   - Keep storage initialization fail-fast before TCP server startup.
+   - Keep default data path rooted at `~/.overhop/data` with `~/` and `$HOME/` expansion support.
+   - Keep engine-specific details behind storage backend abstractions so domain logic stays engine-agnostic.
 
 ## Intent
 
