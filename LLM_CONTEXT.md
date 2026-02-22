@@ -21,6 +21,9 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
 9. Logging is implemented as a pluggable facade in `src/logging/mod.rs`:
    - Keep domain/business code coupled only to `Logger` API.
    - Keep output/backend details behind the `LogSink` abstraction.
+10. Event pub/sub is implemented as a dedicated facade in `src/events/mod.rs`:
+   - Use sync listeners when failures must impact runtime flow.
+   - Use async listeners for isolated background reactions.
 
 ## Intent
 
