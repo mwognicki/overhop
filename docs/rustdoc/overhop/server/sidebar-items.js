@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_HOST","DEFAULT_PORT","DEFAULT_TLS_ENABLED"],"enum":["ServerError"],"struct":["PersistentConnection","ServerConfig","TcpServer"]};

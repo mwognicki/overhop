@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HELLO_MESSAGE_TYPE","HI_MESSAGE_TYPE"],"enum":["HandshakeError"],"fn":["process_client_handshake_frame"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["QueuePoolError","QueueState"],"fn":["new_queue_id","validate_queue_name"],"mod":["persistent"],"struct":["Queue","QueueConfig","QueuePool","QueuePoolSnapshot"]};

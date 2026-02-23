@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HEARTBEAT_EVENT","MAX_INTERVAL_MS","MIN_INTERVAL_MS"],"enum":["HeartbeatError"],"struct":["Heartbeat","HeartbeatConfig"]};

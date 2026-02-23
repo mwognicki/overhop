@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["NOT_IMPLEMENTED_CODE","PROTOCOL_VERSION","SERVER_ERR_MESSAGE_TYPE","SERVER_MESSAGE_TYPE_MIN","SERVER_OK_MESSAGE_TYPE","SERVER_PUSH_REQUEST_ID"],"enum":["EnvelopeError"],"fn":["parse_i64","parse_payload_map","parse_string"],"struct":["WireEnvelope"],"type":["PayloadMap"]};
