@@ -76,6 +76,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Registered workers may use JOB (`t=15`, payload `jid`) to fetch persisted job records by id; system-queue jobs remain inaccessible.
    - Registered workers may use RMJOB (`t=16`, payload `jid`) to remove persisted jobs in statuses `delayed|new|failed|completed`; system-queue jobs remain inaccessible.
    - Registered workers may use LSJOB (`t=17`, payload `q`, `status`, optional `page_size`, optional `page`) to list persisted jobs filtered by queue and status, ordered by `created_at` ascending.
+   - Registered workers may use QSTATS (`t=18`, payload `q`) to fetch persisted job counters per status for non-system queues.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Anonymous metadata should track optional IDENT reply deadline timestamp when IDENT challenge is issued.

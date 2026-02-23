@@ -15,8 +15,9 @@ use crate::wire::handshake::HELLO_MESSAGE_TYPE;
 use crate::wire::session::{
     ADDQUEUE_MESSAGE_TYPE, CREDIT_MESSAGE_TYPE, ENQUEUE_MESSAGE_TYPE, JOB_MESSAGE_TYPE,
     LSJOB_MESSAGE_TYPE, LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE, PING_MESSAGE_TYPE,
-    QUEUE_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, RESUME_MESSAGE_TYPE, RMJOB_MESSAGE_TYPE,
-    RMQUEUE_MESSAGE_TYPE, STATUS_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE, UNSUBSCRIBE_MESSAGE_TYPE,
+    QSTATS_MESSAGE_TYPE, QUEUE_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, RESUME_MESSAGE_TYPE,
+    RMJOB_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, STATUS_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE,
+    UNSUBSCRIBE_MESSAGE_TYPE,
 };
 
 const COLOR_HEADER: &str = "\x1b[38;5;214m";
@@ -341,6 +342,19 @@ pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebu
         rmjob_payload,
     )?;
 
+    let mut qstats_payload = PayloadMap::new();
+    qstats_payload.insert(
+        "q".to_owned(),
+        Value::String(persisted_queue_name.clone().into()),
+    );
+    let _ = send_and_receive(
+        &mut stream,
+        &codec,
+        QSTATS_MESSAGE_TYPE,
+        "sd-20",
+        qstats_payload,
+    )?;
+
     println!("{COLOR_HEADER}====== SELF DEBUG MODE COMPLETE ======{RESET}");
     Ok(())
 }
@@ -504,6 +518,7 @@ fn message_type_name(message_type: i64) -> &'static str {
         LSJOB_MESSAGE_TYPE => "LSJOB",
         JOB_MESSAGE_TYPE => "JOB",
         RMJOB_MESSAGE_TYPE => "RMJOB",
+        QSTATS_MESSAGE_TYPE => "QSTATS",
         STATUS_MESSAGE_TYPE => "STATUS",
         crate::wire::envelope::SERVER_OK_MESSAGE_TYPE => "OK",
         crate::wire::envelope::SERVER_ERR_MESSAGE_TYPE => "ERR",

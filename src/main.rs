@@ -911,6 +911,87 @@ fn process_worker_client_messages(
                             }
                         }
                     }
+                    Ok(WorkerProtocolAction::QueueStatsRequested {
+                        request_id,
+                        queue_name,
+                    }) => {
+                        if let Err((code, message)) =
+                            ensure_non_system_queue_for_worker(persistent_queues, &queue_name)
+                        {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                code,
+                                &message,
+                            );
+                            continue;
+                        }
+
+                        let stats = match storage.list_queue_status_counts() {
+                            Ok(stats) => stats,
+                            Err(error) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOB_PERSISTENCE_ERROR",
+                                    &format!(
+                                        "failed to load queue status counters from storage: {error}"
+                                    ),
+                                );
+                                continue;
+                            }
+                        };
+
+                        let mut counts_by_status = std::collections::HashMap::<String, u64>::new();
+                        for stat in stats {
+                            if stat.queue_name == queue_name && is_qstats_status_allowed(&stat.status)
+                            {
+                                counts_by_status.insert(stat.status, stat.count);
+                            }
+                        }
+
+                        let mut summary = Vec::new();
+                        for status in qstats_statuses() {
+                            let count = *counts_by_status.get(*status).unwrap_or(&0);
+                            summary.push((
+                                rmpv::Value::String((*status).into()),
+                                rmpv::Value::Integer((count as i64).into()),
+                            ));
+                        }
+
+                        let mut payload = PayloadMap::new();
+                        payload.insert("q".to_owned(), rmpv::Value::String(queue_name.into()));
+                        payload.insert("stats".to_owned(), rmpv::Value::Map(summary));
+
+                        match wire_codec
+                            .encode_frame(&WireEnvelope::ok(request_id, Some(payload)).into_raw())
+                        {
+                            Ok(frame) => {
+                                write_response_frame(
+                                    &connection,
+                                    &frame,
+                                    connection.id(),
+                                    logger,
+                                    "QSTATS OK response",
+                                );
+                                let _ = pools.workers.touch_now(worker_id);
+                            }
+                            Err(error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to build QSTATS response for worker {worker_id}: {error}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
                     Ok(WorkerProtocolAction::LsJobRequested {
                         request_id,
                         queue_name,
@@ -2487,6 +2568,14 @@ fn is_lsjob_status_allowed(status: &str) -> bool {
         status,
         "new" | "delayed" | "waiting" | "failed" | "completed" | "active"
     )
+}
+
+fn qstats_statuses() -> &'static [&'static str] {
+    &["new", "waiting", "delayed", "completed", "failed", "active"]
+}
+
+fn is_qstats_status_allowed(status: &str) -> bool {
+    qstats_statuses().contains(&status)
 }
 
 fn queue_metadata_payload(queue: &Queue) -> PayloadMap {

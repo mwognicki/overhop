@@ -348,6 +348,26 @@ Constraints:
 - ordering is `created_at` ascending
 - pagination is applied after filtering
 
+### QSTATS (worker client -> server)
+
+- Message type: `t=18`
+- Allowed only for registered workers.
+- Payload:
+  - `q` (`string`, required): queue name
+
+Response:
+
+- success: `OK` (`t=101`) payload with queue-status job counters map:
+  - `q`
+  - `stats` (`map<string,int>`) for statuses: `new`, `waiting`, `delayed`, `completed`, `failed`, `active`
+- failure: `ERR` (`t=102`) with standard error payload
+
+Constraints:
+
+- queue must exist
+- system queues (`_` prefix) are not allowed
+- counters are sourced from persistence-maintained queue/status stats
+
 ## Implemented Worker Subscription Flow
 
 ### SUBSCRIBE (worker client -> server)

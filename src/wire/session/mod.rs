@@ -24,6 +24,7 @@ pub const ENQUEUE_MESSAGE_TYPE: i64 = 14;
 pub const JOB_MESSAGE_TYPE: i64 = 15;
 pub const RMJOB_MESSAGE_TYPE: i64 = 16;
 pub const LSJOB_MESSAGE_TYPE: i64 = 17;
+pub const QSTATS_MESSAGE_TYPE: i64 = 18;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -80,6 +81,10 @@ pub enum WorkerProtocolAction {
         status: String,
         page_size: Option<u32>,
         page: Option<u32>,
+    },
+    QueueStatsRequested {
+        request_id: String,
+        queue_name: String,
     },
     SubscribeRequested {
         request_id: String,
@@ -573,6 +578,24 @@ pub fn evaluate_worker_client_frame(
             });
         }
 
+        if envelope.message_type == QSTATS_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("q")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "QSTATS payload must contain string key 'q'".to_owned(),
+                })?;
+
+            return Ok(WorkerProtocolAction::QueueStatsRequested {
+                request_id: envelope.request_id,
+                queue_name,
+            });
+        }
+
         if envelope.message_type == SUBSCRIBE_MESSAGE_TYPE {
             let queue_name = envelope
                 .payload
@@ -697,7 +720,7 @@ pub fn evaluate_worker_client_frame(
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
             message:
-                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, PAUSE, RESUME, ENQUEUE, JOB, RMJOB, LSJOB, or STATUS"
+                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, PAUSE, RESUME, ENQUEUE, JOB, RMJOB, LSJOB, QSTATS, or STATUS"
                     .to_owned(),
         });
     }
@@ -830,10 +853,11 @@ mod tests {
 
     use super::{
         ADDQUEUE_MESSAGE_TYPE, AnonymousProtocolAction, CREDIT_MESSAGE_TYPE, ENQUEUE_MESSAGE_TYPE,
-        IDENT_MESSAGE_TYPE, JOB_MESSAGE_TYPE, LSJOB_MESSAGE_TYPE, LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE,
-        PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE, RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE,
-        RMJOB_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE, PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE,
-        REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE, WorkerProtocolAction,
+        IDENT_MESSAGE_TYPE, JOB_MESSAGE_TYPE, LSJOB_MESSAGE_TYPE, LSQUEUE_MESSAGE_TYPE,
+        PAUSE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, QSTATS_MESSAGE_TYPE, QUEUE_MESSAGE_TYPE,
+        RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, RMJOB_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE,
+        PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE,
+        WorkerProtocolAction,
         UNSUBSCRIBE_MESSAGE_TYPE,
         build_ident_frame, build_pong_frame, build_protocol_error_frame,
         evaluate_anonymous_client_frame, evaluate_worker_client_frame,
@@ -1402,6 +1426,35 @@ mod tests {
                 page: None,
             }
         );
+    }
+
+    #[test]
+    fn worker_qstats_requires_q_string() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut payload = PayloadMap::new();
+        payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        let qstats =
+            crate::wire::envelope::WireEnvelope::new(QSTATS_MESSAGE_TYPE, "rid-qstats", payload);
+        let frame = codec
+            .encode_frame(&qstats.into_raw())
+            .expect("qstats should encode");
+        let action = evaluate_worker_client_frame(&codec, &frame).expect("qstats should pass");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::QueueStatsRequested {
+                request_id: "rid-qstats".to_owned(),
+                queue_name: "critical".to_owned(),
+            }
+        );
+
+        let bad =
+            crate::wire::envelope::WireEnvelope::new(QSTATS_MESSAGE_TYPE, "rid-bad-qstats", PayloadMap::new());
+        let bad_frame = codec
+            .encode_frame(&bad.into_raw())
+            .expect("qstats should encode");
+        let err = evaluate_worker_client_frame(&codec, &bad_frame)
+            .expect_err("qstats without q should fail");
+        assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
     }
 
     #[test]
