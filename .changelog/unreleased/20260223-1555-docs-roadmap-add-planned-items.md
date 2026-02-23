@@ -1,0 +1,4 @@
+- extended ROADMAP with planned items for missing wire grammar and logic (`GOODBYE`, per-job logs, `QUEST` + `ACK`, processing heartbeat checks)
+- added planned items for job lifecycle gaps (completed handling, failed/retries/backoff policy)
+- added planned queue clear/obliterate flows and storage-backend agnosticism refinement item
+- clarified roadmap note to track both implemented and planned status markers

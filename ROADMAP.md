@@ -52,6 +52,7 @@ Until the best repeatable workflow for LLM-assisted development is established, 
 | Pause/resume state | `src/orchestrator/queues` | ✅ |
 | Persistent bootstrap/reload flow | `src/orchestrator/queues/persistent.rs` | ✅ |
 | Serializable queue snapshots and persisted queue UUIDs | `src/orchestrator/queues` | ✅ |
+| Queue clearing and obliteration operations | Missing logic and matching wire grammar for destructive queue lifecycle operations | 🟡 Planned |
 
 ### Job Orchestration
 
@@ -63,6 +64,9 @@ Until the best repeatable workflow for LLM-assisted development is established, 
 | Retries metadata | `src/orchestrator/jobs` | ✅ |
 | Event-driven persist-and-evict flow | `src/orchestrator/jobs`, `src/main.rs` | ✅ |
 | Shutdown drain behavior | `src/orchestrator/jobs`, `src/main.rs` | ✅ |
+| Server-driven job delegation to workers | Missing dispatch logic for assignment lifecycle | 🟡 Planned |
+| Completed jobs handling | Missing end-to-end completion flow semantics | 🟡 Planned |
+| Failed jobs handling with retries/backoff policy | Missing runtime failure policy and retry scheduling behavior | 🟡 Planned |
 
 ### Storage & Persistence
 
@@ -74,6 +78,7 @@ Until the best repeatable workflow for LLM-assisted development is established, 
 | Status FIFO index | `src/storage` | ✅ |
 | Queue+status paginated retrieval | `src/storage` | ✅ |
 | Persisted queue-status counters updated on insert/transition/delete | `src/storage` | ✅ |
+| Backend-agnostic storage internals | Current module is still too tightly coupled to concrete sled implementation | 🟡 Planned |
 
 ### Wire Core
 
@@ -92,6 +97,11 @@ Until the best repeatable workflow for LLM-assisted development is established, 
 | Protocol violation handling | `src/wire/session` | ✅ |
 | IDENT/PONG builders | `src/wire/session` | ✅ |
 | Message parsing/validation for implemented message types | `src/wire/session` | ✅ |
+| `GOODBYE` message grammar and exit-flow handling | Missing client/server goodbye semantics with exit reason payload | 🟡 Planned |
+| Per-job worker log append grammar and handling | Missing message flow for workers to append job-scoped logs | 🟡 Planned |
+| `QUEST` delegation grammar and worker `ACK` reply flow | Missing server->worker assignment grammar and receive acknowledgement semantics | 🟡 Planned |
+| Processing-worker heartbeat grammar and stale-worker checks | Missing processing-state liveness protocol and enforcement | 🟡 Planned |
+| Queue clear/obliterate wire grammar | Missing message types to trigger queue clearing/obliteration flows | 🟡 Planned |
 
 ### Self-Debug Workflow
 
@@ -104,5 +114,5 @@ Until the best repeatable workflow for LLM-assisted development is established, 
 
 ## Notes
 
-- This document tracks delivered functionality only.
-- Planned/future work should be added incrementally as research direction stabilizes.
+- This document tracks both delivered functionality (`✅`) and selected planned items (`🟡 Planned`).
+- Planned/future work should still be added incrementally as research direction stabilizes.
