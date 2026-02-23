@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PoolError"],"struct":["AnonymousConnectionMaintenance","AnonymousConnectionRecord","AnonymousConnectionSnapshot","AnonymousConnectionsPool","ConnectionWorkerPools","Subscription","WorkerMetadata","WorkerRecord","WorkerSnapshot","WorkersPool"]};

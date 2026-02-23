@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EmitError"],"struct":["Event","EventEmitter","LifecycleState","ListenerLifecycle"],"type":["AsyncListener","ListenerResult","SyncListener"]};

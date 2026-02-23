@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["JobStatus","JobsPoolError"],"struct":["Job","JobLookup","JobRuntimeMetadata","JobsPool","JobsPoolSnapshot","NewJobOptions"]};
