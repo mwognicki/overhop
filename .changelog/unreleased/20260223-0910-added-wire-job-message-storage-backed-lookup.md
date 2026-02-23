@@ -1,0 +1,5 @@
+- added worker wire message `JOB` (`t=15`) with required payload `jid` (`<queue-name>:<uuid>`)
+- implemented storage-backed job lookup by `jid` with jobs-pool routed id parsing/validation
+- `JOB` now returns OK with full persisted job payload when found, or empty OK payload when missing
+- enforced system queue access restriction for JOB lookups (`_`-prefixed queues are rejected)
+- updated wire protocol and module docs for JOB message flow
