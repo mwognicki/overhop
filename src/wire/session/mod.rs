@@ -23,6 +23,7 @@ pub const RESUME_MESSAGE_TYPE: i64 = 13;
 pub const ENQUEUE_MESSAGE_TYPE: i64 = 14;
 pub const JOB_MESSAGE_TYPE: i64 = 15;
 pub const RMJOB_MESSAGE_TYPE: i64 = 16;
+pub const LSJOB_MESSAGE_TYPE: i64 = 17;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -72,6 +73,13 @@ pub enum WorkerProtocolAction {
     RemoveJobRequested {
         request_id: String,
         job_id: String,
+    },
+    LsJobRequested {
+        request_id: String,
+        queue_name: String,
+        status: String,
+        page_size: Option<u32>,
+        page: Option<u32>,
     },
     SubscribeRequested {
         request_id: String,
@@ -492,6 +500,79 @@ pub fn evaluate_worker_client_frame(
             });
         }
 
+        if envelope.message_type == LSJOB_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("q")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "LSJOB payload must contain string key 'q'".to_owned(),
+                })?;
+            let status = envelope
+                .payload
+                .get("status")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "LSJOB payload must contain string key 'status'".to_owned(),
+                })?;
+            let page_size = match envelope.payload.get("page_size") {
+                Some(value) => {
+                    let Some(raw) = value.as_i64() else {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message: "LSJOB payload key 'page_size' must be integer >= 1"
+                                .to_owned(),
+                        });
+                    };
+                    if raw < 1 || raw > u32::MAX as i64 {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message: "LSJOB payload key 'page_size' must be in range 1..=u32::MAX"
+                                .to_owned(),
+                        });
+                    }
+                    Some(raw as u32)
+                }
+                None => None,
+            };
+            let page = match envelope.payload.get("page") {
+                Some(value) => {
+                    let Some(raw) = value.as_i64() else {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message: "LSJOB payload key 'page' must be integer >= 1".to_owned(),
+                        });
+                    };
+                    if raw < 1 || raw > u32::MAX as i64 {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message: "LSJOB payload key 'page' must be in range 1..=u32::MAX"
+                                .to_owned(),
+                        });
+                    }
+                    Some(raw as u32)
+                }
+                None => None,
+            };
+            return Ok(WorkerProtocolAction::LsJobRequested {
+                request_id: envelope.request_id,
+                queue_name,
+                status,
+                page_size,
+                page,
+            });
+        }
+
         if envelope.message_type == SUBSCRIBE_MESSAGE_TYPE {
             let queue_name = envelope
                 .payload
@@ -616,7 +697,7 @@ pub fn evaluate_worker_client_frame(
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
             message:
-                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, PAUSE, RESUME, ENQUEUE, JOB, RMJOB, or STATUS"
+                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, PAUSE, RESUME, ENQUEUE, JOB, RMJOB, LSJOB, or STATUS"
                     .to_owned(),
         });
     }
@@ -749,7 +830,7 @@ mod tests {
 
     use super::{
         ADDQUEUE_MESSAGE_TYPE, AnonymousProtocolAction, CREDIT_MESSAGE_TYPE, ENQUEUE_MESSAGE_TYPE,
-        IDENT_MESSAGE_TYPE, JOB_MESSAGE_TYPE, LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE,
+        IDENT_MESSAGE_TYPE, JOB_MESSAGE_TYPE, LSJOB_MESSAGE_TYPE, LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE,
         PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE, RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE,
         RMJOB_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE, PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE,
         REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE, WorkerProtocolAction,
@@ -1273,6 +1354,54 @@ mod tests {
         let err = evaluate_worker_client_frame(&codec, &bad_frame)
             .expect_err("rmjob without jid should fail");
         assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
+    }
+
+    #[test]
+    fn worker_lsjob_requires_q_status_and_valid_optional_pagination() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut payload = PayloadMap::new();
+        payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        payload.insert("status".to_owned(), rmpv::Value::String("waiting".into()));
+        payload.insert("page_size".to_owned(), rmpv::Value::Integer(10_i64.into()));
+        payload.insert("page".to_owned(), rmpv::Value::Integer(2_i64.into()));
+        let lsjob =
+            crate::wire::envelope::WireEnvelope::new(LSJOB_MESSAGE_TYPE, "rid-lsjob", payload);
+        let frame = codec
+            .encode_frame(&lsjob.into_raw())
+            .expect("lsjob should encode");
+
+        let action = evaluate_worker_client_frame(&codec, &frame).expect("lsjob should pass");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::LsJobRequested {
+                request_id: "rid-lsjob".to_owned(),
+                queue_name: "critical".to_owned(),
+                status: "waiting".to_owned(),
+                page_size: Some(10),
+                page: Some(2),
+            }
+        );
+
+        let mut default_payload = PayloadMap::new();
+        default_payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        default_payload.insert("status".to_owned(), rmpv::Value::String("new".into()));
+        let default_lsjob =
+            crate::wire::envelope::WireEnvelope::new(LSJOB_MESSAGE_TYPE, "rid-lsjob-default", default_payload);
+        let default_frame = codec
+            .encode_frame(&default_lsjob.into_raw())
+            .expect("lsjob should encode");
+        let default_action =
+            evaluate_worker_client_frame(&codec, &default_frame).expect("lsjob should pass");
+        assert_eq!(
+            default_action,
+            WorkerProtocolAction::LsJobRequested {
+                request_id: "rid-lsjob-default".to_owned(),
+                queue_name: "critical".to_owned(),
+                status: "new".to_owned(),
+                page_size: None,
+                page: None,
+            }
+        );
     }
 
     #[test]

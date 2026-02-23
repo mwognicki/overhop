@@ -316,6 +316,7 @@ fn main() {
             storage.as_ref(),
             &mut persistent_queues,
             jobs_pool.as_ref(),
+            app_config.pagination.page_size,
             app_started_at,
         );
 
@@ -800,6 +801,7 @@ fn process_worker_client_messages(
     storage: &StorageFacade,
     persistent_queues: &mut PersistentQueuePool,
     jobs_pool: &Mutex<JobsPool>,
+    default_page_size: u32,
     app_started_at: DateTime<Utc>,
 ) {
     let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
@@ -904,6 +906,153 @@ fn process_worker_client_messages(
                                     Some("main::wire"),
                                     &format!(
                                         "failed to build LSQUEUE response for worker {worker_id}: {error}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    Ok(WorkerProtocolAction::LsJobRequested {
+                        request_id,
+                        queue_name,
+                        status,
+                        page_size,
+                        page,
+                    }) => {
+                        if let Err((code, message)) =
+                            ensure_queue_exists_for_worker(persistent_queues, &queue_name)
+                        {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                code,
+                                &message,
+                            );
+                            continue;
+                        }
+
+                        if !is_lsjob_status_allowed(&status) {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "INVALID_JOB_STATUS_FILTER",
+                                &format!(
+                                    "unsupported status '{status}'; allowed values: new,delayed,waiting,failed,completed"
+                                ),
+                            );
+                            continue;
+                        }
+
+                        let effective_page_size = page_size.unwrap_or(default_page_size);
+                        if effective_page_size == 0 {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "INVALID_PAGE_SIZE",
+                                "page_size must be >= 1",
+                            );
+                            continue;
+                        }
+                        let effective_page = page.unwrap_or(1);
+                        if effective_page == 0 {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "INVALID_PAGE",
+                                "page must be >= 1",
+                            );
+                            continue;
+                        }
+
+                        let records = match storage.list_job_records_by_queue_and_status(
+                            &queue_name,
+                            &status,
+                            effective_page,
+                            effective_page_size,
+                        ) {
+                            Ok(records) => records,
+                            Err(error) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOB_PERSISTENCE_ERROR",
+                                    &format!(
+                                        "failed to list jobs by queue/status from storage: {error}"
+                                    ),
+                                );
+                                continue;
+                            }
+                        };
+
+                        let mut jobs = Vec::with_capacity(records.len());
+                        let mut invalid_record = None;
+                        for record in records {
+                            match json_value_to_rmpv(&record) {
+                                Ok(value) => jobs.push(value),
+                                Err(message) => {
+                                    invalid_record = Some(message);
+                                    break;
+                                }
+                            }
+                        }
+                        if let Some(message) = invalid_record {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "JOB_RECORD_INVALID",
+                                message,
+                            );
+                            continue;
+                        }
+
+                        let mut payload = PayloadMap::new();
+                        payload.insert("q".to_owned(), rmpv::Value::String(queue_name.into()));
+                        payload.insert("status".to_owned(), rmpv::Value::String(status.into()));
+                        payload.insert(
+                            "page".to_owned(),
+                            rmpv::Value::Integer((effective_page as i64).into()),
+                        );
+                        payload.insert(
+                            "page_size".to_owned(),
+                            rmpv::Value::Integer((effective_page_size as i64).into()),
+                        );
+                        payload.insert("jobs".to_owned(), rmpv::Value::Array(jobs));
+
+                        match wire_codec
+                            .encode_frame(&WireEnvelope::ok(request_id, Some(payload)).into_raw())
+                        {
+                            Ok(frame) => {
+                                write_response_frame(
+                                    &connection,
+                                    &frame,
+                                    connection.id(),
+                                    logger,
+                                    "LSJOB OK response",
+                                );
+                                let _ = pools.workers.touch_now(worker_id);
+                            }
+                            Err(error) => {
+                                logger.warn(
+                                    Some("main::wire"),
+                                    &format!(
+                                        "failed to build LSJOB response for worker {worker_id}: {error}"
                                     ),
                                 );
                             }
@@ -2331,6 +2480,10 @@ fn job_status_to_str(status: JobStatus) -> &'static str {
 
 fn can_remove_job_by_status(status: &str) -> bool {
     matches!(status, "delayed" | "new" | "failed" | "completed")
+}
+
+fn is_lsjob_status_allowed(status: &str) -> bool {
+    matches!(status, "new" | "delayed" | "waiting" | "failed" | "completed")
 }
 
 fn queue_metadata_payload(queue: &Queue) -> PayloadMap {

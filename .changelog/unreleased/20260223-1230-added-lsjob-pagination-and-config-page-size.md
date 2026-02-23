@@ -1,0 +1,5 @@
+- added configurable default pagination page size under `pagination.page_size` (default `15`) with TOML/argv support
+- implemented worker wire message `LSJOB` (`t=17`) with payload `q`, `status`, optional `page_size`, optional `page`
+- `LSJOB` returns filtered persisted jobs by queue+status, ordered by `created_at` ascending, paginated by page/page_size
+- extended storage facade/backend with queue+status paginated job listing backed by status FIFO index order
+- updated config/wire/storage docs and templates for pagination and `LSJOB`

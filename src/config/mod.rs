@@ -12,6 +12,8 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub wire: WireConfig,
     #[serde(default)]
+    pub pagination: PaginationConfig,
+    #[serde(default)]
     pub storage: StorageConfig,
 }
 
@@ -45,6 +47,17 @@ pub struct WireSessionConfig {
     pub unhelloed_max_lifetime_seconds: u64,
     pub helloed_unregistered_max_lifetime_seconds: u64,
     pub ident_register_timeout_seconds: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PaginationConfig {
+    pub page_size: u32,
+}
+
+impl Default for PaginationConfig {
+    fn default() -> Self {
+        Self { page_size: 15 }
+    }
 }
 
 impl Default for WireSessionConfig {
@@ -124,6 +137,7 @@ impl Default for AppConfig {
             heartbeat: HeartbeatConfig::default(),
             server: ServerConfig::default(),
             wire: WireConfig::default(),
+            pagination: PaginationConfig::default(),
             storage: StorageConfig::default(),
         }
     }
@@ -474,6 +488,9 @@ max_envelope_size_bytes = 8388608
 unhelloed_max_lifetime_seconds = 10
 helloed_unregistered_max_lifetime_seconds = 10
 ident_register_timeout_seconds = 2
+
+[pagination]
+page_size = 15
 "#,
             "default",
         );
@@ -495,6 +512,7 @@ ident_register_timeout_seconds = 2
             10
         );
         assert_eq!(config.wire.session.ident_register_timeout_seconds, 2);
+        assert_eq!(config.pagination.page_size, 15);
         assert_eq!(config.storage.engine, "sled");
         assert_eq!(config.storage.path, "~/.overhop/data");
         assert_eq!(config.storage.sled.cache_capacity, None);
@@ -524,6 +542,9 @@ max_envelope_size_bytes = 8388608
 unhelloed_max_lifetime_seconds = 10
 helloed_unregistered_max_lifetime_seconds = 10
 ident_register_timeout_seconds = 2
+
+[pagination]
+page_size = 15
 
 [storage]
 engine = "sled"
@@ -557,6 +578,8 @@ path = "~/.overhop/data"
                 "20".to_owned(),
                 "--wire.session.ident_register_timeout_seconds".to_owned(),
                 "3".to_owned(),
+                "--pagination.page_size".to_owned(),
+                "22".to_owned(),
                 "--storage.path".to_owned(),
                 "/tmp/overhop-data".to_owned(),
                 "--storage.self_debug_path".to_owned(),
@@ -579,6 +602,7 @@ path = "~/.overhop/data"
             20
         );
         assert_eq!(config.wire.session.ident_register_timeout_seconds, 3);
+        assert_eq!(config.pagination.page_size, 22);
         assert_eq!(config.storage.path, "/tmp/overhop-data");
         assert_eq!(
             config.storage.self_debug_path,
@@ -611,6 +635,9 @@ max_envelope_size_bytes = 8388608
 unhelloed_max_lifetime_seconds = 10
 helloed_unregistered_max_lifetime_seconds = 10
 ident_register_timeout_seconds = 2
+
+[pagination]
+page_size = 15
 
 [storage]
 engine = "sled"
@@ -662,6 +689,7 @@ path = "~/.overhop/data"
         assert_eq!(config.server.port, 9876);
         assert!(!config.server.tls_enabled);
         assert_eq!(config.wire.max_envelope_size_bytes, 8_388_608);
+        assert_eq!(config.pagination.page_size, 15);
         assert_eq!(config.storage.engine, "sled");
         assert_eq!(config.storage.path, "~/.overhop/data");
     }
@@ -673,6 +701,8 @@ path = "~/.overhop/data"
             "verbose".to_owned(),
             "--server.port".to_owned(),
             "9999".to_owned(),
+            "--pagination.page_size".to_owned(),
+            "25".to_owned(),
             "--storage.path".to_owned(),
             "/tmp/overhop-fallback".to_owned(),
         ])
@@ -680,6 +710,7 @@ path = "~/.overhop/data"
 
         assert_eq!(config.logging.level, "verbose");
         assert_eq!(config.server.port, 9999);
+        assert_eq!(config.pagination.page_size, 25);
         assert_eq!(config.storage.path, "/tmp/overhop-fallback");
     }
 }

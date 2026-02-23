@@ -321,6 +321,33 @@ Constraints:
 - removable statuses are only: `delayed`, `new`, `failed`, `completed`
 - removal must permanently delete primary key and related indexes from persistence
 
+### LSJOB (worker client -> server)
+
+- Message type: `t=17`
+- Allowed only for registered workers.
+- Payload:
+  - `q` (`string`, required): queue name
+  - `status` (`string`, required): one of `new`, `delayed`, `waiting`, `failed`, `completed`
+  - `page_size` (`int`, optional): page size (`>= 1`), defaults to `pagination.page_size`
+  - `page` (`int`, optional): page number (`>= 1`), defaults to `1`
+
+Response:
+
+- success: `OK` (`t=101`) payload with:
+  - `q`
+  - `status`
+  - `page`
+  - `page_size`
+  - `jobs` (array of full persisted job metadata maps)
+- failure: `ERR` (`t=102`) with standard error payload
+
+Constraints:
+
+- queue must exist
+- results are filtered by queue name and status
+- ordering is `created_at` ascending
+- pagination is applied after filtering
+
 ## Implemented Worker Subscription Flow
 
 ### SUBSCRIBE (worker client -> server)

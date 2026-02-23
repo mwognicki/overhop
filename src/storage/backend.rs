@@ -10,6 +10,13 @@ pub trait StorageBackend: Send + Sync {
     fn replace_queues(&self, queues: &[Queue]) -> Result<(), StorageError>;
     fn list_job_uuids_by_status(&self, status: &str) -> Result<Vec<Uuid>, StorageError>;
     fn list_job_uuids_by_status_fifo(&self, status: &str) -> Result<Vec<Uuid>, StorageError>;
+    fn list_job_records_by_queue_and_status(
+        &self,
+        queue_name: &str,
+        status: &str,
+        page: u32,
+        page_size: u32,
+    ) -> Result<Vec<serde_json::Value>, StorageError>;
     fn upsert_job_record(
         &self,
         job_uuid: Uuid,

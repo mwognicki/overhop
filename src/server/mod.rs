@@ -235,8 +235,8 @@ mod tests {
     use std::time::Duration;
 
     use crate::config::{
-        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig as AppServerConfig, StorageConfig,
-        WireConfig, WireSessionConfig,
+        AppConfig, HeartbeatConfig, LoggingConfig, PaginationConfig,
+        ServerConfig as AppServerConfig, StorageConfig, WireConfig, WireSessionConfig,
     };
 
     use super::{
@@ -338,6 +338,7 @@ mod tests {
                 max_envelope_size_bytes: 8_388_608,
                 session: WireSessionConfig::default(),
             },
+            pagination: PaginationConfig::default(),
             storage: StorageConfig::default(),
         };
 

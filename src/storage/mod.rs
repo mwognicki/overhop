@@ -15,8 +15,8 @@ pub use sled_backend::SledStorage;
 #[cfg(test)]
 mod tests {
     use crate::config::{
-        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig, SledConfig, StorageConfig,
-        WireConfig, WireSessionConfig,
+        AppConfig, HeartbeatConfig, LoggingConfig, PaginationConfig, ServerConfig, SledConfig,
+        StorageConfig, WireConfig, WireSessionConfig,
     };
     use crate::logging::LoggerConfig;
     use crate::orchestrator::queues::Queue;
@@ -40,6 +40,7 @@ mod tests {
                 max_envelope_size_bytes: 8_388_608,
                 session: WireSessionConfig::default(),
             },
+            pagination: PaginationConfig::default(),
             storage: StorageConfig {
                 engine: "sled".to_owned(),
                 path: path.to_owned(),
@@ -280,6 +281,63 @@ mod tests {
                 .expect("status fifo lookup should work")
                 .contains(&job_uuid)
         );
+
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn list_job_records_by_queue_and_status_is_paginated_and_created_at_ordered() {
+        let path = unique_temp_path("job-list-page");
+        let storage = test_storage(&path);
+
+        let queue_name = "critical";
+        let status = "waiting";
+
+        for offset in 0..5 {
+            let created_at = chrono::Utc::now() + chrono::Duration::milliseconds(offset);
+            let job_uuid = uuid::Uuid::new_v4();
+            let record = serde_json::json!({
+                "uuid": job_uuid.to_string(),
+                "jid": format!("{queue_name}:{job_uuid}"),
+                "queue_name": queue_name,
+                "status": status,
+                "execution_start_at": created_at.to_rfc3339(),
+                "created_at": created_at.to_rfc3339(),
+            });
+            storage
+                .upsert_job_record(
+                    job_uuid,
+                    &record,
+                    created_at.timestamp_millis(),
+                    created_at.timestamp_millis(),
+                    queue_name,
+                    status,
+                )
+                .expect("job upsert should work");
+        }
+
+        let first_page = storage
+            .list_job_records_by_queue_and_status(queue_name, status, 1, 2)
+            .expect("list should work");
+        let second_page = storage
+            .list_job_records_by_queue_and_status(queue_name, status, 2, 2)
+            .expect("list should work");
+        let third_page = storage
+            .list_job_records_by_queue_and_status(queue_name, status, 3, 2)
+            .expect("list should work");
+
+        assert_eq!(first_page.len(), 2);
+        assert_eq!(second_page.len(), 2);
+        assert_eq!(third_page.len(), 1);
+        let created_first = first_page[0]
+            .get("created_at")
+            .and_then(serde_json::Value::as_str)
+            .expect("created_at should exist");
+        let created_last = third_page[0]
+            .get("created_at")
+            .and_then(serde_json::Value::as_str)
+            .expect("created_at should exist");
+        assert!(created_first < created_last);
 
         let _ = std::fs::remove_dir_all(path);
     }

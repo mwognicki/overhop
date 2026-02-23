@@ -141,8 +141,8 @@ impl std::error::Error for PersistentQueuePoolError {}
 #[cfg(test)]
 mod tests {
     use crate::config::{
-        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig, SledConfig, StorageConfig,
-        WireConfig, WireSessionConfig,
+        AppConfig, HeartbeatConfig, LoggingConfig, PaginationConfig, ServerConfig, SledConfig,
+        StorageConfig, WireConfig, WireSessionConfig,
     };
     use crate::logging::{LogLevel, Logger, LoggerConfig};
     use crate::storage::StorageFacade;
@@ -165,6 +165,7 @@ mod tests {
                 max_envelope_size_bytes: 8_388_608,
                 session: WireSessionConfig::default(),
             },
+            pagination: PaginationConfig::default(),
             storage: StorageConfig {
                 engine: "sled".to_owned(),
                 path: path.to_owned(),

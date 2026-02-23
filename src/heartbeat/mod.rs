@@ -172,7 +172,7 @@ mod tests {
     use serde_json::Value;
 
     use crate::config::{
-        AppConfig, HeartbeatConfig as AppHeartbeatConfig, LoggingConfig,
+        AppConfig, HeartbeatConfig as AppHeartbeatConfig, LoggingConfig, PaginationConfig,
         ServerConfig as AppServerConfig, StorageConfig, WireConfig, WireSessionConfig,
     };
     use crate::events::EventEmitter;
@@ -252,6 +252,7 @@ mod tests {
                 max_envelope_size_bytes: 8_388_608,
                 session: WireSessionConfig::default(),
             },
+            pagination: PaginationConfig::default(),
             storage: StorageConfig::default(),
         };
 
