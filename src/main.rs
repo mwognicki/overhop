@@ -24,9 +24,7 @@ use diagnostics::build_status_payload;
 use events::EventEmitter;
 use heartbeat::{HEARTBEAT_EVENT, Heartbeat};
 use logging::{LogLevel, Logger, LoggerConfig};
-use orchestrator::jobs::{
-    JobsPool, JobsPoolError, JobsStorageBackend, JobsStorageError, NewJobOptions,
-};
+use orchestrator::jobs::{Job, JobStatus, JobsPool, JobsPoolError, NewJobOptions};
 use orchestrator::queues::{Queue, QueueState};
 use orchestrator::queues::persistent::{PersistentQueuePool, PersistentQueuePoolError};
 use pools::{ConnectionWorkerPools, PoolError};
@@ -42,6 +40,8 @@ use wire::session::{
     WorkerProtocolAction, build_ident_frame, build_pong_frame, build_protocol_error_frame,
     evaluate_anonymous_client_frame, evaluate_worker_client_frame,
 };
+
+const JOB_PERSIST_REQUESTED_EVENT: &str = "jobs.persist.requested";
 
 fn main() {
     ensure_posix_or_exit();
@@ -90,9 +90,7 @@ fn main() {
             eprintln!("queue bootstrap error: {error}");
             process::exit(2);
         });
-    let mut jobs_pool = JobsPool::with_storage(Box::new(StorageFacadeJobsBackend::new(Arc::clone(
-        &storage,
-    ))));
+    let jobs_pool = Arc::new(Mutex::new(JobsPool::new()));
     logger.log(
         LogLevel::Info,
         Some("main::orchestrator"),
@@ -164,6 +162,50 @@ fn main() {
     });
     emitter.on_async("app.started", |event| {
         eprintln!("async event observed: {}", event.name);
+        Ok(())
+    });
+    let storage_for_job_persist = Arc::clone(&storage);
+    let jobs_pool_for_persist = Arc::clone(&jobs_pool);
+    let logger_for_job_persist = Arc::clone(&logger);
+    emitter.on(JOB_PERSIST_REQUESTED_EVENT, move |event| {
+        let Some(payload) = event.payload.as_ref() else {
+            return Err("job persist event payload is missing".to_owned());
+        };
+
+        let Some(job_uuid_raw) = payload.get("job_uuid").and_then(serde_json::Value::as_str) else {
+            return Err("job persist event missing string 'job_uuid'".to_owned());
+        };
+        let job_uuid = uuid::Uuid::parse_str(job_uuid_raw)
+            .map_err(|_| "job persist event has invalid 'job_uuid'".to_owned())?;
+        let Some(record) = payload.get("record") else {
+            return Err("job persist event missing 'record'".to_owned());
+        };
+        let Some(execution_start_ms) = payload
+            .get("execution_start_ms")
+            .and_then(serde_json::Value::as_i64)
+        else {
+            return Err("job persist event missing i64 'execution_start_ms'".to_owned());
+        };
+        let Some(queue_name) = payload.get("queue_name").and_then(serde_json::Value::as_str) else {
+            return Err("job persist event missing string 'queue_name'".to_owned());
+        };
+        let Some(status) = payload.get("status").and_then(serde_json::Value::as_str) else {
+            return Err("job persist event missing string 'status'".to_owned());
+        };
+
+        storage_for_job_persist
+            .upsert_job_record(job_uuid, record, execution_start_ms, queue_name, status)
+            .map_err(|error| error.to_string())?;
+
+        let mut guard = jobs_pool_for_persist
+            .lock()
+            .map_err(|_| "jobs pool lock poisoned while removing persisted job".to_owned())?;
+        let _ = guard.remove_job(job_uuid);
+
+        logger_for_job_persist.debug(
+            Some("main::jobs"),
+            &format!("Persisted staged job '{job_uuid}' and removed it from transient pool"),
+        );
         Ok(())
     });
     let pools_for_maintenance = Arc::clone(&pools);
@@ -252,11 +294,12 @@ fn main() {
         );
         process_worker_client_messages(
             pools.as_ref(),
+            emitter.as_ref(),
             wire_codec.as_ref(),
             logger.as_ref(),
             storage.as_ref(),
             &mut persistent_queues,
-            &mut jobs_pool,
+            jobs_pool.as_ref(),
             app_started_at,
         );
 
@@ -733,11 +776,12 @@ fn purge_stale_anonymous_connections(
 
 fn process_worker_client_messages(
     pools: &ConnectionWorkerPools,
+    emitter: &EventEmitter,
     wire_codec: &WireCodec,
     logger: &Logger,
     storage: &StorageFacade,
     persistent_queues: &mut PersistentQueuePool,
-    jobs_pool: &mut JobsPool,
+    jobs_pool: &Mutex<JobsPool>,
     app_started_at: DateTime<Utc>,
 ) {
     let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
@@ -918,22 +962,71 @@ fn process_worker_client_messages(
                             continue;
                         }
 
-                        let enqueue_result = jobs_pool.enqueue_job(
-                            persistent_queues.queue_pool(),
-                            &queue_name,
-                            NewJobOptions {
-                                payload: job_payload,
-                                scheduled_at,
-                                max_attempts,
-                                retry_interval_ms,
-                            },
-                        );
-                        match enqueue_result {
-                            Ok(job_uuid) => {
+                        let staged_job = match jobs_pool.lock() {
+                            Ok(mut guard) => {
+                                let enqueue_result = guard.enqueue_job(
+                                    persistent_queues.queue_pool(),
+                                    &queue_name,
+                                    NewJobOptions {
+                                        payload: job_payload,
+                                        scheduled_at,
+                                        max_attempts,
+                                        retry_interval_ms,
+                                    },
+                                );
+                                match enqueue_result {
+                                    Ok(job_uuid) => {
+                                        let Some(job) = guard.get_job(job_uuid).cloned() else {
+                                            let _ = send_worker_protocol_error(
+                                                wire_codec,
+                                                logger,
+                                                &connection,
+                                                worker_id,
+                                                &request_id,
+                                                "JOB_NOT_FOUND",
+                                                "enqueued job is missing in transient jobs pool",
+                                            );
+                                            continue;
+                                        };
+                                        job
+                                    }
+                                    Err(error) => {
+                                        let (code, message) =
+                                            map_jobs_pool_error_for_worker_error(&error);
+                                        let _ = send_worker_protocol_error(
+                                            wire_codec,
+                                            logger,
+                                            &connection,
+                                            worker_id,
+                                            &request_id,
+                                            code,
+                                            &message,
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOBS_POOL_LOCK_POISONED",
+                                    "jobs pool lock poisoned while staging enqueue request",
+                                );
+                                continue;
+                            }
+                        };
+
+                        let persist_payload = build_job_persist_event_payload(&staged_job);
+                        match emitter.emit(JOB_PERSIST_REQUESTED_EVENT, Some(persist_payload)) {
+                            Ok(()) => {
                                 let mut payload = PayloadMap::new();
                                 payload.insert(
                                     "jid".to_owned(),
-                                    rmpv::Value::String(format!("{queue_name}:{job_uuid}").into()),
+                                    rmpv::Value::String(staged_job.job_id.clone().into()),
                                 );
 
                                 match wire_codec
@@ -960,15 +1053,14 @@ fn process_worker_client_messages(
                                 }
                             }
                             Err(error) => {
-                                let (code, message) = map_jobs_pool_error_for_worker_error(&error);
                                 let _ = send_worker_protocol_error(
                                     wire_codec,
                                     logger,
                                     &connection,
                                     worker_id,
                                     &request_id,
-                                    code,
-                                    &message,
+                                    "JOB_PERSIST_EVENT_FAILED",
+                                    &format!("failed to persist staged job via event flow: {error}"),
                                 );
                             }
                         }
@@ -1578,10 +1670,6 @@ fn map_jobs_pool_error_for_worker_error(error: &JobsPoolError) -> (&'static str,
             "INVALID_JOB_PAYLOAD",
             format!("job payload serialization failed: {inner}"),
         ),
-        JobsPoolError::Storage(inner) => (
-            "JOB_PERSISTENCE_ERROR",
-            format!("job persistence failed: {inner}"),
-        ),
     }
 }
 
@@ -1630,38 +1718,36 @@ fn queue_jobs_allow_removal(_queue_name: &str) -> bool {
     true
 }
 
-struct StorageFacadeJobsBackend {
-    storage: Arc<StorageFacade>,
+fn build_job_record_json(job: &Job) -> serde_json::Value {
+    serde_json::json!({
+        "uuid": job.uuid.to_string(),
+        "jid": job.job_id,
+        "queue_name": job.queue_name,
+        "payload": job.payload,
+        "status": job_status_to_str(job.status),
+        "execution_start_at": job.execution_start_at.to_rfc3339(),
+        "max_attempts": job.max_attempts,
+        "retry_interval_ms": job.retry_interval_ms,
+        "created_at": job.created_at.to_rfc3339(),
+        "runtime": {
+            "attempts_so_far": job.runtime.attempts_so_far
+        }
+    })
 }
 
-impl StorageFacadeJobsBackend {
-    fn new(storage: Arc<StorageFacade>) -> Self {
-        Self { storage }
-    }
+fn build_job_persist_event_payload(job: &Job) -> serde_json::Value {
+    serde_json::json!({
+        "job_uuid": job.uuid.to_string(),
+        "record": build_job_record_json(job),
+        "execution_start_ms": job.execution_start_at.timestamp_millis(),
+        "queue_name": job.queue_name,
+        "status": job_status_to_str(job.status),
+    })
 }
 
-impl JobsStorageBackend for StorageFacadeJobsBackend {
-    fn persist_new_job(&self, job: &orchestrator::jobs::Job) -> Result<(), JobsStorageError> {
-        let record = serde_json::json!({
-            "uuid": job.uuid.to_string(),
-            "jid": job.job_id,
-            "queue_name": job.queue_name,
-            "payload": job.payload,
-            "status": "new",
-            "execution_start_at": job.execution_start_at.to_rfc3339(),
-            "max_attempts": job.max_attempts,
-            "retry_interval_ms": job.retry_interval_ms,
-            "created_at": job.created_at.to_rfc3339(),
-            "runtime": {
-                "attempts_so_far": job.runtime.attempts_so_far
-            }
-        });
-
-        self.storage
-            .upsert_job_record(job.uuid, &record)
-            .map_err(|source| JobsStorageError::PersistFailed {
-                reason: source.to_string(),
-            })
+fn job_status_to_str(status: JobStatus) -> &'static str {
+    match status {
+        JobStatus::New => "new",
     }
 }
 

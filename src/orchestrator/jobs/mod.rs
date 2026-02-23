@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt;
-
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
@@ -54,40 +53,6 @@ pub struct JobsPoolSnapshot {
     pub jobs: Vec<Job>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PersistenceFlowMode {
-    PoolThenPersist,
-    PersistThenPoolReserved,
-}
-
-pub trait JobsStorageBackend: Send + Sync {
-    fn persist_new_job(&self, job: &Job) -> Result<(), JobsStorageError>;
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct NoopJobsStorageBackend;
-
-impl JobsStorageBackend for NoopJobsStorageBackend {
-    fn persist_new_job(&self, _job: &Job) -> Result<(), JobsStorageError> {
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub enum JobsStorageError {
-    PersistFailed { reason: String },
-}
-
-impl fmt::Display for JobsStorageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PersistFailed { reason } => write!(f, "jobs persistence failed: {reason}"),
-        }
-    }
-}
-
-impl std::error::Error for JobsStorageError {}
-
 #[derive(Debug)]
 pub enum JobsPoolError {
     QueueNotFound { queue_name: String },
@@ -95,7 +60,6 @@ pub enum JobsPoolError {
     InvalidMaxAttempts { max_attempts: u32 },
     InvalidRetryIntervalMs { retry_interval_ms: u64 },
     PayloadSerializationFailed(serde_json::Error),
-    Storage(JobsStorageError),
 }
 
 impl fmt::Display for JobsPoolError {
@@ -116,7 +80,6 @@ impl fmt::Display for JobsPoolError {
             Self::PayloadSerializationFailed(source) => {
                 write!(f, "job payload serialization failed: {source}")
             }
-            Self::Storage(source) => write!(f, "{source}"),
         }
     }
 }
@@ -125,8 +88,6 @@ impl std::error::Error for JobsPoolError {}
 
 pub struct JobsPool {
     jobs: HashMap<Uuid, Job>,
-    storage: Box<dyn JobsStorageBackend>,
-    persistence_flow_mode: PersistenceFlowMode,
 }
 
 impl Default for JobsPool {
@@ -139,25 +100,7 @@ impl JobsPool {
     pub fn new() -> Self {
         Self {
             jobs: HashMap::new(),
-            storage: Box::new(NoopJobsStorageBackend),
-            persistence_flow_mode: PersistenceFlowMode::PoolThenPersist,
         }
-    }
-
-    pub fn with_storage(storage: Box<dyn JobsStorageBackend>) -> Self {
-        Self {
-            jobs: HashMap::new(),
-            storage,
-            persistence_flow_mode: PersistenceFlowMode::PoolThenPersist,
-        }
-    }
-
-    pub fn persistence_flow_mode(&self) -> PersistenceFlowMode {
-        self.persistence_flow_mode
-    }
-
-    pub fn reserve_persist_then_pool_mode(&mut self) {
-        self.persistence_flow_mode = PersistenceFlowMode::PersistThenPoolReserved;
     }
 
     pub fn enqueue_job(
@@ -191,7 +134,7 @@ impl JobsPool {
 
         let uuid = Uuid::new_v4();
         let execution_start_at = options.scheduled_at.unwrap_or_else(Utc::now);
-        let job = Job {
+        let staged_job = Job {
             uuid,
             job_id: format!("{queue_name}:{uuid}"),
             queue_name: queue_name.to_owned(),
@@ -204,14 +147,7 @@ impl JobsPool {
             runtime: JobRuntimeMetadata { attempts_so_far: 0 },
         };
 
-        self.jobs.insert(uuid, job);
-
-        if let Some(stored_job) = self.jobs.get(&uuid) {
-            if let Err(error) = self.storage.persist_new_job(stored_job) {
-                let _ = self.jobs.remove(&uuid);
-                return Err(JobsPoolError::Storage(error));
-            }
-        }
+        self.jobs.insert(uuid, staged_job);
 
         Ok(uuid)
     }
@@ -229,6 +165,10 @@ impl JobsPool {
     pub fn count(&self) -> usize {
         self.jobs.len()
     }
+
+    pub fn remove_job(&mut self, uuid: Uuid) -> Option<Job> {
+        self.jobs.remove(&uuid)
+    }
 }
 
 #[cfg(test)]
@@ -238,20 +178,7 @@ mod tests {
 
     use crate::orchestrator::queues::QueuePool;
 
-    use super::{
-        JobStatus, JobsPool, JobsPoolError, JobsStorageBackend, JobsStorageError, NewJobOptions,
-        PersistenceFlowMode,
-    };
-
-    struct FailingStorage;
-
-    impl JobsStorageBackend for FailingStorage {
-        fn persist_new_job(&self, _job: &super::Job) -> Result<(), JobsStorageError> {
-            Err(JobsStorageError::PersistFailed {
-                reason: "storage unavailable".to_owned(),
-            })
-        }
-    }
+    use super::{JobStatus, JobsPool, JobsPoolError, NewJobOptions};
 
     #[test]
     fn enqueue_requires_existing_queue() {
@@ -381,33 +308,20 @@ mod tests {
     }
 
     #[test]
-    fn enqueue_rolls_back_when_storage_fails() {
+    fn can_remove_staged_job_from_pool() {
         let mut queue_pool = QueuePool::new();
         queue_pool
             .register_queue("persisted", None)
             .expect("queue should register");
-        let mut jobs_pool = JobsPool::with_storage(Box::new(FailingStorage));
-
-        let err = jobs_pool
-            .enqueue_job(&queue_pool, "persisted", NewJobOptions::default())
-            .expect_err("enqueue should fail when storage fails");
-        assert!(matches!(err, JobsPoolError::Storage(_)));
-        assert_eq!(jobs_pool.count(), 0);
-    }
-
-    #[test]
-    fn can_prepare_reserved_persistence_flow_mode() {
         let mut jobs_pool = JobsPool::new();
-        assert_eq!(
-            jobs_pool.persistence_flow_mode(),
-            PersistenceFlowMode::PoolThenPersist
-        );
 
-        jobs_pool.reserve_persist_then_pool_mode();
-        assert_eq!(
-            jobs_pool.persistence_flow_mode(),
-            PersistenceFlowMode::PersistThenPoolReserved
-        );
+        let staged_uuid = jobs_pool
+            .enqueue_job(&queue_pool, "persisted", NewJobOptions::default())
+            .expect("enqueue should stage job");
+        assert_eq!(jobs_pool.count(), 1);
+        let removed = jobs_pool.remove_job(staged_uuid);
+        assert!(removed.is_some());
+        assert_eq!(jobs_pool.count(), 0);
     }
 
     #[test]

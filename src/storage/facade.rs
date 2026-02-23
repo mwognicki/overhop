@@ -108,8 +108,12 @@ impl StorageFacade {
         &self,
         job_uuid: Uuid,
         record: &serde_json::Value,
+        execution_start_ms: i64,
+        queue_name: &str,
+        status: &str,
     ) -> Result<(), StorageError> {
-        self.backend.upsert_job_record(job_uuid, record)
+        self.backend
+            .upsert_job_record(job_uuid, record, execution_start_ms, queue_name, status)
     }
 
     pub fn get_job_payload_by_uuid(

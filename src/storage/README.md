@@ -29,9 +29,13 @@ Provide a pluggable storage facade so business/domain modules depend on stable s
 
 - Versioned namespace:
   - queues: `v1:q:<queue-name>`
-  - jobs: `v1:j:<job-uuid>`
+  - jobs (primary): `v1:j:<job-uuid>`
+  - jobs queue-time index: `v1:j_qt:<execution-start-ms>:<queue-name>:<job-uuid>`
+  - jobs status value key: `v1:status:<job-uuid>`
 - Queue records are scanned by prefix (`v1:q:`) for full queue-state restoration.
 - Job-by-UUID lookup is direct by exact key (`v1:j:<uuid>`).
+- Queue-time index sorts by execution start first, then queue name, then job uuid.
+- Status key stores mutable status value and is optimized for frequent updates.
 - Key prefixes are immutable and versioned to allow future keyspace migrations without breaking existing data.
 
 ## Most Relevant Features
