@@ -117,6 +117,8 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Overhop runtime target is POSIX (`unix`) only.
    - Startup must print the hardcoded decorative banner verbatim before subsystem initialization.
    - Startup banner footer should include app/version/build-date metadata, short description, and MIT liability disclaimer text.
+29. Shared utility helpers live in `src/utils`:
+   - Prefer `utils::timing::measure_execution` or `ScopedExecutionTimer` for named execution-time debug logs of startup/module operations.
 
 ## Intent
 

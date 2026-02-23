@@ -1,0 +1,4 @@
+- added reusable `utils::timing` helper for named execution-time measurement with debug-level logging
+- implemented human-friendly elapsed duration formatting (millisecond-based)
+- applied timing wrapper to `StorageFacade::initialize` call in startup flow
+- added module docs for utils and linked it from the main README

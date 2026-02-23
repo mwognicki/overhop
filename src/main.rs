@@ -9,6 +9,7 @@ mod self_debug;
 mod server;
 mod storage;
 mod shutdown;
+mod utils;
 mod wire;
 
 use std::process;
@@ -30,6 +31,7 @@ use serde_json::json;
 use server::TcpServer;
 use storage::StorageFacade;
 use shutdown::ShutdownHooks;
+use utils::timing::measure_execution;
 use wire::codec::WireCodec;
 use wire::envelope::{PayloadMap, WireEnvelope};
 use wire::session::{
@@ -65,7 +67,13 @@ fn main() {
         min_level: log_level,
         human_friendly: app_config.logging.human_friendly,
     }));
-    let storage = StorageFacade::initialize(&app_config, logger.as_ref()).unwrap_or_else(|error| {
+    let storage = measure_execution(
+        "storage.initialize",
+        Some("main::startup"),
+        logger.as_ref(),
+        || StorageFacade::initialize(&app_config, logger.as_ref()),
+    )
+    .unwrap_or_else(|error| {
         eprintln!("storage initialization error: {error}");
         process::exit(2);
     });

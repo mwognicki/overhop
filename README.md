@@ -87,6 +87,7 @@ Module-level docs:
 - Server: [`src/server/README.md`](src/server/README.md)
 - Shutdown: [`src/shutdown/README.md`](src/shutdown/README.md)
 - Storage: [`src/storage/README.md`](src/storage/README.md)
+- Utils: [`src/utils/README.md`](src/utils/README.md)
 - Wire (overview): [`src/wire/README.md`](src/wire/README.md)
 - Wire Codec: [`src/wire/codec/README.md`](src/wire/codec/README.md)
 - Wire Envelope: [`src/wire/envelope/README.md`](src/wire/envelope/README.md)
