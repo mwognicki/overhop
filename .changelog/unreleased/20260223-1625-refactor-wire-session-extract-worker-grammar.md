@@ -1,0 +1,4 @@
+- extracted worker message grammar parsing from `src/wire/session/mod.rs` into dedicated `src/wire/session/worker.rs`
+- kept `session/mod.rs` focused on anonymous lifecycle/session concerns (HELLO/REGISTER/IDENT/PONG helpers)
+- re-exported worker parser/action API from session module to preserve call sites
+- updated session module README to document worker grammar delegation

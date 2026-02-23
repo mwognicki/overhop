@@ -23,6 +23,7 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Supports worker subscription flow requests (`SUBSCRIBE`, `UNSUBSCRIBE`) parsing/validation.
 - Supports worker credit increment request (`CREDIT`) parsing/validation.
 - Supports worker diagnostics snapshot request (`STATUS`) parsing/validation.
+- Delegates worker message grammar parsing to dedicated `worker` submodule to keep session lifecycle logic focused.
 
 ## Most Relevant Features
 
