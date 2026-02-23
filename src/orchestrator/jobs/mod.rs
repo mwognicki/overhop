@@ -1,11 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Mutex;
+use std::thread;
+use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::logging::Logger;
 use crate::orchestrator::queues::QueuePool;
+use crate::storage::StorageFacade;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JobStatus {
@@ -214,6 +219,284 @@ impl JobsPool {
             job_uuid,
         })
     }
+}
+
+pub fn queue_jobs_allow_removal(_queue_name: &str) -> bool {
+    true
+}
+
+pub fn drain_transient_jobs_pool_before_exit(
+    storage: &StorageFacade,
+    jobs_pool: &Mutex<JobsPool>,
+    logger: &Logger,
+) {
+    let max_wait = Duration::from_secs(10);
+    let started_at = Instant::now();
+
+    loop {
+        let pending = match jobs_pool.lock() {
+            Ok(guard) => guard.snapshot().jobs,
+            Err(_) => {
+                logger.warn(
+                    Some("jobs::shutdown"),
+                    "jobs pool lock poisoned during shutdown flush; skipping transient drain",
+                );
+                return;
+            }
+        };
+
+        if pending.is_empty() {
+            logger.info(
+                Some("jobs::shutdown"),
+                "Transient jobs pool drained before exit",
+            );
+            return;
+        }
+
+        let mut persisted_count = 0usize;
+        for job in pending {
+            let record = build_job_record_json(&job);
+            let persisted = storage
+                .upsert_job_record(
+                    job.uuid,
+                    &record,
+                    job.execution_start_at.timestamp_millis(),
+                    job.created_at.timestamp_millis(),
+                    &job.queue_name,
+                    job_status_to_str(job.status),
+                )
+                .is_ok();
+            if persisted {
+                if let Ok(mut guard) = jobs_pool.lock() {
+                    let _ = guard.remove_job(job.uuid);
+                }
+                persisted_count += 1;
+            }
+        }
+
+        let remaining = match jobs_pool.lock() {
+            Ok(guard) => guard.count(),
+            Err(_) => 0,
+        };
+        logger.debug(
+            Some("jobs::shutdown"),
+            &format!(
+                "Transient jobs flush iteration persisted {persisted_count} jobs, remaining {remaining}"
+            ),
+        );
+
+        if remaining == 0 {
+            logger.info(
+                Some("jobs::shutdown"),
+                "Transient jobs pool drained before exit",
+            );
+            return;
+        }
+
+        if started_at.elapsed() >= max_wait {
+            logger.warn(
+                Some("jobs::shutdown"),
+                &format!(
+                    "Transient jobs pool still has {remaining} jobs after {:?}; best-effort drain exhausted",
+                    max_wait
+                ),
+            );
+            return;
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+pub fn build_job_record_json(job: &Job) -> serde_json::Value {
+    serde_json::json!({
+        "uuid": job.uuid.to_string(),
+        "jid": job.job_id,
+        "queue_name": job.queue_name,
+        "payload": job.payload,
+        "status": job_status_to_str(job.status),
+        "execution_start_at": job.execution_start_at.to_rfc3339(),
+        "max_attempts": job.max_attempts,
+        "retry_interval_ms": job.retry_interval_ms,
+        "created_at": job.created_at.to_rfc3339(),
+        "runtime": {
+            "attempts_so_far": job.runtime.attempts_so_far
+        }
+    })
+}
+
+pub fn build_job_persist_event_payload(job: &Job) -> serde_json::Value {
+    serde_json::json!({
+        "job_uuid": job.uuid.to_string(),
+        "record": build_job_record_json(job),
+        "execution_start_ms": job.execution_start_at.timestamp_millis(),
+        "created_at_ms": job.created_at.timestamp_millis(),
+        "queue_name": job.queue_name,
+        "status": job_status_to_str(job.status),
+    })
+}
+
+pub fn advance_persisted_jobs_statuses(storage: &StorageFacade, logger: &Logger) -> Result<(), String> {
+    let now = Utc::now();
+    let mut transitioned = 0usize;
+    let paused_queues = load_paused_queue_names(storage)?;
+
+    let new_jobs = storage
+        .list_job_uuids_by_status("new")
+        .map_err(|error| error.to_string())?;
+    for job_uuid in new_jobs {
+        let Some(record) = storage
+            .get_job_payload_by_uuid(job_uuid)
+            .map_err(|error| error.to_string())?
+        else {
+            continue;
+        };
+        let Some(queue_name) = extract_queue_name(&record) else {
+            continue;
+        };
+        if paused_queues.contains(&queue_name) {
+            continue;
+        }
+        let target_status = match extract_execution_start_at(&record) {
+            Some(execution_start_at) if execution_start_at > now => JobStatus::Delayed,
+            Some(_) => JobStatus::Waiting,
+            None => JobStatus::Waiting,
+        };
+        if apply_persisted_job_status_transition(storage, job_uuid, record, target_status)? {
+            transitioned += 1;
+        }
+    }
+
+    let delayed_jobs = storage
+        .list_job_uuids_by_status("delayed")
+        .map_err(|error| error.to_string())?;
+    for job_uuid in delayed_jobs {
+        let Some(record) = storage
+            .get_job_payload_by_uuid(job_uuid)
+            .map_err(|error| error.to_string())?
+        else {
+            continue;
+        };
+        let Some(queue_name) = extract_queue_name(&record) else {
+            continue;
+        };
+        if paused_queues.contains(&queue_name) {
+            continue;
+        }
+        let Some(execution_start_at) = extract_execution_start_at(&record) else {
+            continue;
+        };
+        if execution_start_at <= now
+            && apply_persisted_job_status_transition(storage, job_uuid, record, JobStatus::Waiting)?
+        {
+            transitioned += 1;
+        }
+    }
+
+    if transitioned > 0 {
+        logger.debug(
+            Some("jobs::heartbeat"),
+            &format!("Heartbeat job-status progression transitioned {transitioned} jobs"),
+        );
+    }
+    Ok(())
+}
+
+pub fn load_paused_queue_names(storage: &StorageFacade) -> Result<HashSet<String>, String> {
+    let queues = storage.load_queues().map_err(|error| error.to_string())?;
+    Ok(queues
+        .into_iter()
+        .filter(|queue| queue.is_paused())
+        .map(|queue| queue.name)
+        .collect())
+}
+
+pub fn apply_persisted_job_status_transition(
+    storage: &StorageFacade,
+    job_uuid: uuid::Uuid,
+    mut record: serde_json::Value,
+    target_status: JobStatus,
+) -> Result<bool, String> {
+    let Some(execution_start_at) = extract_execution_start_at(&record) else {
+        return Ok(false);
+    };
+    let Some(queue_name) = record
+        .get("queue_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+    else {
+        return Ok(false);
+    };
+    let current_status = record
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("new");
+    let target_status_str = job_status_to_str(target_status);
+    if current_status == target_status_str {
+        return Ok(false);
+    }
+    record["status"] = serde_json::Value::String(target_status_str.to_owned());
+    storage
+        .upsert_job_record(
+            job_uuid,
+            &record,
+            execution_start_at.timestamp_millis(),
+            extract_created_at(&record)
+                .map(|timestamp| timestamp.timestamp_millis())
+                .unwrap_or_else(|| Utc::now().timestamp_millis()),
+            &queue_name,
+            target_status_str,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+pub fn extract_execution_start_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
+    let raw = record.get("execution_start_at")?.as_str()?;
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
+pub fn extract_created_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
+    let raw = record.get("created_at")?.as_str()?;
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
+pub fn extract_queue_name(record: &serde_json::Value) -> Option<String> {
+    record
+        .get("queue_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+pub fn job_status_to_str(status: JobStatus) -> &'static str {
+    match status {
+        JobStatus::New => "new",
+        JobStatus::Waiting => "waiting",
+        JobStatus::Delayed => "delayed",
+    }
+}
+
+pub fn can_remove_job_by_status(status: &str) -> bool {
+    matches!(status, "delayed" | "new" | "failed" | "completed")
+}
+
+pub fn is_lsjob_status_allowed(status: &str) -> bool {
+    matches!(
+        status,
+        "new" | "delayed" | "waiting" | "failed" | "completed" | "active"
+    )
+}
+
+pub fn qstats_statuses() -> &'static [&'static str] {
+    &["new", "waiting", "delayed", "completed", "failed", "active"]
+}
+
+pub fn is_qstats_status_allowed(status: &str) -> bool {
+    qstats_statuses().contains(&status)
 }
 
 #[cfg(test)]

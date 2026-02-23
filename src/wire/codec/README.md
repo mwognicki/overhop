@@ -34,3 +34,4 @@ Implement strict binary framing and MessagePack serialization for `MessageEnvelo
 - Length-prefixed frame encoder/decoder with big-endian `u32` header.
 - Explicit protocol violations for `length == 0` and `length > 8 MiB`.
 - Top-level envelope constrained to map with string keys.
+- Includes JSON-to-MessagePack conversion helpers for building wire payload maps from persisted JSON records.

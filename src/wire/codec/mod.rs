@@ -255,6 +255,54 @@ pub fn decode_payload(payload: &[u8]) -> Result<MessageEnvelope, CodecError> {
     WireCodec::default().decode_payload(payload)
 }
 
+pub fn json_object_to_payload_map(
+    value: &serde_json::Value,
+) -> Result<MessageEnvelope, &'static str> {
+    let serde_json::Value::Object(entries) = value else {
+        return Err("persisted job record is not a map object");
+    };
+    let mut payload = MessageEnvelope::new();
+    for (key, entry) in entries {
+        payload.insert(key.clone(), json_value_to_rmpv(entry)?);
+    }
+    Ok(payload)
+}
+
+pub fn json_value_to_rmpv(value: &serde_json::Value) -> Result<rmpv::Value, &'static str> {
+    match value {
+        serde_json::Value::Null => Ok(rmpv::Value::Nil),
+        serde_json::Value::Bool(v) => Ok(rmpv::Value::Boolean(*v)),
+        serde_json::Value::Number(v) => {
+            if let Some(raw) = v.as_i64() {
+                Ok(rmpv::Value::Integer(raw.into()))
+            } else if let Some(raw) = v.as_u64() {
+                if raw > i64::MAX as u64 {
+                    Err("persisted job record contains integer above int64 range")
+                } else {
+                    Ok(rmpv::Value::Integer((raw as i64).into()))
+                }
+            } else {
+                Err("persisted job record contains unsupported numeric value")
+            }
+        }
+        serde_json::Value::String(v) => Ok(rmpv::Value::String(v.as_str().into())),
+        serde_json::Value::Array(values) => {
+            let mut out = Vec::with_capacity(values.len());
+            for entry in values {
+                out.push(json_value_to_rmpv(entry)?);
+            }
+            Ok(rmpv::Value::Array(out))
+        }
+        serde_json::Value::Object(values) => {
+            let mut out = Vec::with_capacity(values.len());
+            for (k, v) in values {
+                out.push((rmpv::Value::String(k.as_str().into()), json_value_to_rmpv(v)?));
+            }
+            Ok(rmpv::Value::Map(out))
+        }
+    }
+}
+
 fn parse_envelope(value: Value) -> Result<MessageEnvelope, CodecError> {
     let Value::Map(entries) = value else {
         return Err(CodecError::EnvelopeMustBeMap);

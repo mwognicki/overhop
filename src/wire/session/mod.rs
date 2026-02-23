@@ -8,6 +8,8 @@ use crate::wire::codec::{CodecError, WireCodec};
 use crate::wire::envelope::{EnvelopeError, WireEnvelope};
 use crate::wire::handshake::{process_client_handshake_frame, HELLO_MESSAGE_TYPE};
 
+pub mod runtime;
+
 pub const REGISTER_MESSAGE_TYPE: i64 = 2;
 pub const PING_MESSAGE_TYPE: i64 = 3;
 pub const QUEUE_MESSAGE_TYPE: i64 = 4;
