@@ -15,8 +15,8 @@ use crate::wire::handshake::HELLO_MESSAGE_TYPE;
 use crate::wire::session::{
     ADDQUEUE_MESSAGE_TYPE, CREDIT_MESSAGE_TYPE, ENQUEUE_MESSAGE_TYPE, JOB_MESSAGE_TYPE,
     LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE, PING_MESSAGE_TYPE, QUEUE_MESSAGE_TYPE,
-    REGISTER_MESSAGE_TYPE, RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, STATUS_MESSAGE_TYPE,
-    SUBSCRIBE_MESSAGE_TYPE, UNSUBSCRIBE_MESSAGE_TYPE,
+    REGISTER_MESSAGE_TYPE, RESUME_MESSAGE_TYPE, RMJOB_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE,
+    STATUS_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE, UNSUBSCRIBE_MESSAGE_TYPE,
 };
 
 const COLOR_HEADER: &str = "\x1b[38;5;214m";
@@ -274,7 +274,10 @@ pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebu
     )?;
 
     let mut enqueue_payload = PayloadMap::new();
-    enqueue_payload.insert("q".to_owned(), Value::String(persisted_queue_name.into()));
+    enqueue_payload.insert(
+        "q".to_owned(),
+        Value::String(persisted_queue_name.clone().into()),
+    );
     enqueue_payload.insert(
         "scheduled_at".to_owned(),
         Value::String((chrono::Utc::now() - chrono::Duration::seconds(10)).to_rfc3339().into()),
@@ -292,6 +295,37 @@ pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebu
         ]),
     );
     enqueue_then_fetch_job(&mut stream, &codec, "sd-15", "sd-16", enqueue_payload)?;
+
+    let mut enqueue_for_remove_payload = PayloadMap::new();
+    enqueue_for_remove_payload.insert(
+        "q".to_owned(),
+        Value::String(persisted_queue_name.clone().into()),
+    );
+    enqueue_for_remove_payload.insert(
+        "job_payload".to_owned(),
+        Value::Map(vec![(
+            Value::String("task".into()),
+            Value::String("self-debug-remove-job-check".into()),
+        )]),
+    );
+    let enqueue_for_remove = send_and_receive(
+        &mut stream,
+        &codec,
+        ENQUEUE_MESSAGE_TYPE,
+        "sd-17",
+        enqueue_for_remove_payload,
+    )?;
+    let jid_to_remove = require_string(&enqueue_for_remove.payload, "jid")?;
+
+    let mut rmjob_payload = PayloadMap::new();
+    rmjob_payload.insert("jid".to_owned(), Value::String(jid_to_remove.into()));
+    let _ = send_and_receive(
+        &mut stream,
+        &codec,
+        RMJOB_MESSAGE_TYPE,
+        "sd-18",
+        rmjob_payload,
+    )?;
 
     println!("{COLOR_HEADER}====== SELF DEBUG MODE COMPLETE ======{RESET}");
     Ok(())
@@ -454,6 +488,7 @@ fn message_type_name(message_type: i64) -> &'static str {
         RESUME_MESSAGE_TYPE => "RESUME",
         ENQUEUE_MESSAGE_TYPE => "ENQUEUE",
         JOB_MESSAGE_TYPE => "JOB",
+        RMJOB_MESSAGE_TYPE => "RMJOB",
         STATUS_MESSAGE_TYPE => "STATUS",
         crate::wire::envelope::SERVER_OK_MESSAGE_TYPE => "OK",
         crate::wire::envelope::SERVER_ERR_MESSAGE_TYPE => "ERR",

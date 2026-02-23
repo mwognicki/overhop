@@ -223,4 +223,44 @@ impl StorageBackend for SledStorage {
             .map(|raw| serde_json::from_slice(raw.as_ref()).map_err(StorageError::DeserializeJob))
             .transpose()
     }
+
+    fn remove_job_record(&self, job_uuid: Uuid) -> Result<bool, StorageError> {
+        let primary_key = job_key(job_uuid);
+        let Some(existing_raw) = self.db.get(primary_key.as_bytes()).map_err(StorageError::Sled)? else {
+            return Ok(false);
+        };
+
+        let parsed = serde_json::from_slice::<serde_json::Value>(existing_raw.as_ref())
+            .map_err(StorageError::DeserializeJob)?;
+        let existing_status = parsed.get("status").and_then(serde_json::Value::as_str);
+        let existing_created_at_ms = parse_rfc3339_timestamp_ms(&parsed, "created_at");
+        let existing_queue_name = parsed.get("queue_name").and_then(serde_json::Value::as_str);
+        let existing_execution_start_ms = parse_rfc3339_timestamp_ms(&parsed, "execution_start_at");
+
+        let mut batch = sled::Batch::default();
+        batch.remove(primary_key.as_bytes());
+        batch.remove(job_status_key(job_uuid));
+        if let (Some(existing_status), Some(existing_created_at_ms)) =
+            (existing_status, existing_created_at_ms)
+        {
+            batch.remove(job_status_fifo_key(
+                existing_status,
+                existing_created_at_ms,
+                job_uuid,
+            ));
+        }
+        if let (Some(existing_queue_name), Some(existing_execution_start_ms)) =
+            (existing_queue_name, existing_execution_start_ms)
+        {
+            batch.remove(job_queue_time_key(
+                existing_execution_start_ms,
+                existing_queue_name,
+                job_uuid,
+            ));
+        }
+
+        self.db.apply_batch(batch).map_err(StorageError::Sled)?;
+        self.db.flush().map_err(StorageError::Sled)?;
+        Ok(true)
+    }
 }

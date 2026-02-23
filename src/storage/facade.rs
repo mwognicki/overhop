@@ -131,4 +131,8 @@ impl StorageFacade {
     ) -> Result<Option<serde_json::Value>, StorageError> {
         self.backend.get_job_payload_by_uuid(job_uuid)
     }
+
+    pub fn remove_job_record(&self, job_uuid: Uuid) -> Result<bool, StorageError> {
+        self.backend.remove_job_record(job_uuid)
+    }
 }

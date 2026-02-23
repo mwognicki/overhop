@@ -19,5 +19,6 @@ pub trait StorageBackend: Send + Sync {
         queue_name: &str,
         status: &str,
     ) -> Result<(), StorageError>;
+    fn remove_job_record(&self, job_uuid: Uuid) -> Result<bool, StorageError>;
     fn get_job_payload_by_uuid(&self, job_uuid: Uuid) -> Result<Option<serde_json::Value>, StorageError>;
 }

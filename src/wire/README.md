@@ -24,6 +24,7 @@ Provide transport-level wire protocol building blocks while keeping framing/seri
   - includes worker `PAUSE/RESUME` queue-state message parsing helpers
   - includes worker `ENQUEUE` job-creation message parsing helpers
   - includes worker `JOB` lookup message parsing helpers
+  - includes worker `RMJOB` removal message parsing helpers
   - includes worker `SUBSCRIBE/UNSUBSCRIBE` subscription message parsing helpers
   - includes worker `CREDIT` subscription credit increment parsing helpers
   - includes worker `STATUS` diagnostics snapshot message parsing helpers
