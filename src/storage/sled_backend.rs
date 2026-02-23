@@ -94,6 +94,23 @@ impl StorageBackend for SledStorage {
         Ok(())
     }
 
+    fn list_job_uuids_by_status(&self, status: &str) -> Result<Vec<Uuid>, StorageError> {
+        let mut uuids = Vec::new();
+        for entry in self.db.scan_prefix(JOB_STATUS_PREFIX) {
+            let (key, value) = entry.map_err(StorageError::Sled)?;
+            if value.as_ref() != status.as_bytes() {
+                continue;
+            }
+            let suffix = &key.as_ref()[JOB_STATUS_PREFIX.len()..];
+            if let Ok(raw_uuid) = std::str::from_utf8(suffix) {
+                if let Ok(parsed) = Uuid::parse_str(raw_uuid) {
+                    uuids.push(parsed);
+                }
+            }
+        }
+        Ok(uuids)
+    }
+
     fn upsert_job_record(
         &self,
         job_uuid: Uuid,

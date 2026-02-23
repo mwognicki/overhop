@@ -211,6 +211,8 @@ fn main() {
     let pools_for_maintenance = Arc::clone(&pools);
     let wire_codec_for_maintenance = Arc::clone(&wire_codec);
     let logger_for_maintenance = Arc::clone(&logger);
+    let storage_for_status_progression = Arc::clone(&storage);
+    let logger_for_status_progression = Arc::clone(&logger);
     let maintenance_interval_seconds = timeout_policy.maintenance_interval_seconds();
     let heartbeat_maintenance_last_run = Arc::new(Mutex::new(None::<DateTime<Utc>>));
     let heartbeat_maintenance_last_run_for_listener = Arc::clone(&heartbeat_maintenance_last_run);
@@ -232,6 +234,13 @@ fn main() {
             timeout_policy,
         );
         Ok(())
+    });
+    emitter.on(HEARTBEAT_EVENT, move |_| {
+        advance_persisted_jobs_statuses(
+            storage_for_status_progression.as_ref(),
+            logger_for_status_progression.as_ref(),
+        )
+        .map_err(|error| format!("jobs status heartbeat progression failed: {error}"))
     });
 
     emitter.emit_or_exit("app.started", Some(json!({"component":"main"})));
@@ -1829,9 +1838,108 @@ fn build_job_persist_event_payload(job: &Job) -> serde_json::Value {
     })
 }
 
+fn advance_persisted_jobs_statuses(storage: &StorageFacade, logger: &Logger) -> Result<(), String> {
+    let now = Utc::now();
+    let mut transitioned = 0usize;
+
+    let new_jobs = storage
+        .list_job_uuids_by_status("new")
+        .map_err(|error| error.to_string())?;
+    for job_uuid in new_jobs {
+        let Some(record) = storage
+            .get_job_payload_by_uuid(job_uuid)
+            .map_err(|error| error.to_string())?
+        else {
+            continue;
+        };
+        let target_status = match extract_execution_start_at(&record) {
+            Some(execution_start_at) if execution_start_at > now => JobStatus::Delayed,
+            Some(_) => JobStatus::Waiting,
+            None => JobStatus::Waiting,
+        };
+        if apply_persisted_job_status_transition(storage, job_uuid, record, target_status)? {
+            transitioned += 1;
+        }
+    }
+
+    let delayed_jobs = storage
+        .list_job_uuids_by_status("delayed")
+        .map_err(|error| error.to_string())?;
+    for job_uuid in delayed_jobs {
+        let Some(record) = storage
+            .get_job_payload_by_uuid(job_uuid)
+            .map_err(|error| error.to_string())?
+        else {
+            continue;
+        };
+        let Some(execution_start_at) = extract_execution_start_at(&record) else {
+            continue;
+        };
+        if execution_start_at <= now
+            && apply_persisted_job_status_transition(storage, job_uuid, record, JobStatus::Waiting)?
+        {
+            transitioned += 1;
+        }
+    }
+
+    if transitioned > 0 {
+        logger.debug(
+            Some("main::jobs"),
+            &format!("Heartbeat job-status progression transitioned {transitioned} jobs"),
+        );
+    }
+    Ok(())
+}
+
+fn apply_persisted_job_status_transition(
+    storage: &StorageFacade,
+    job_uuid: uuid::Uuid,
+    mut record: serde_json::Value,
+    target_status: JobStatus,
+) -> Result<bool, String> {
+    let Some(execution_start_at) = extract_execution_start_at(&record) else {
+        return Ok(false);
+    };
+    let Some(queue_name) = record
+        .get("queue_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+    else {
+        return Ok(false);
+    };
+    let current_status = record
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("new");
+    let target_status_str = job_status_to_str(target_status);
+    if current_status == target_status_str {
+        return Ok(false);
+    }
+    record["status"] = serde_json::Value::String(target_status_str.to_owned());
+    storage
+        .upsert_job_record(
+            job_uuid,
+            &record,
+            execution_start_at.timestamp_millis(),
+            &queue_name,
+            target_status_str,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+fn extract_execution_start_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
+    let raw = record.get("execution_start_at")?.as_str()?;
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
 fn job_status_to_str(status: JobStatus) -> &'static str {
     match status {
         JobStatus::New => "new",
+        JobStatus::Waiting => "waiting",
+        JobStatus::Delayed => "delayed",
     }
 }
 

@@ -28,6 +28,9 @@ Provide a transient jobs staging pool abstraction for queue-aware job creation w
   - default status `new`
   - execution start timestamp from `scheduled_at` or immediate `Utc::now()`
   - `runtime.attempts_so_far` counter initialized to `0`
+  - status progression handled by heartbeat-driven runtime updater:
+    - `new` -> `waiting` or `delayed`
+    - `delayed` -> `waiting` once execution time is reached
 
 ## Most Relevant Features
 

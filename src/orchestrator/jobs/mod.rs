@@ -10,6 +10,8 @@ use crate::orchestrator::queues::QueuePool;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JobStatus {
     New,
+    Waiting,
+    Delayed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

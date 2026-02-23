@@ -104,6 +104,10 @@ impl StorageFacade {
         self.backend.replace_queues(queues)
     }
 
+    pub fn list_job_uuids_by_status(&self, status: &str) -> Result<Vec<Uuid>, StorageError> {
+        self.backend.list_job_uuids_by_status(status)
+    }
+
     pub fn upsert_job_record(
         &self,
         job_uuid: Uuid,

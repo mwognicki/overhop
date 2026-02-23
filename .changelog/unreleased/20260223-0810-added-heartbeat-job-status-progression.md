@@ -1,0 +1,4 @@
+- added heartbeat-bound persisted job status progression: `new` -> (`waiting`|`delayed`) and `delayed` -> `waiting` based on execution start time
+- added storage status-index query API to find jobs by current status for progression updates
+- ensured each status transition is persisted immediately by updating both primary job record and status key
+- added storage test coverage for status index queries and updates

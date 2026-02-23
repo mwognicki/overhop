@@ -104,4 +104,45 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(path);
     }
+
+    #[test]
+    fn job_status_index_roundtrip_and_updates() {
+        let path = unique_temp_path("job-status-index");
+        let storage = test_storage(&path);
+
+        let job_uuid = uuid::Uuid::new_v4();
+        let record = serde_json::json!({
+            "uuid": job_uuid.to_string(),
+            "jid": format!("critical:{job_uuid}"),
+            "queue_name": "critical",
+            "status": "new",
+            "execution_start_at": chrono::Utc::now().to_rfc3339(),
+        });
+        storage
+            .upsert_job_record(job_uuid, &record, chrono::Utc::now().timestamp_millis(), "critical", "new")
+            .expect("job upsert should work");
+
+        let new_jobs = storage
+            .list_job_uuids_by_status("new")
+            .expect("new status query should work");
+        assert!(new_jobs.contains(&job_uuid));
+
+        let mut updated = record;
+        updated["status"] = serde_json::Value::String("waiting".to_owned());
+        storage
+            .upsert_job_record(
+                job_uuid,
+                &updated,
+                chrono::Utc::now().timestamp_millis(),
+                "critical",
+                "waiting",
+            )
+            .expect("job status update should work");
+        let waiting_jobs = storage
+            .list_job_uuids_by_status("waiting")
+            .expect("waiting status query should work");
+        assert!(waiting_jobs.contains(&job_uuid));
+
+        let _ = std::fs::remove_dir_all(path);
+    }
 }
