@@ -930,31 +930,10 @@ fn process_worker_client_messages(
                         );
                         match enqueue_result {
                             Ok(job_uuid) => {
-                                let Some(job) = jobs_pool.get_job(job_uuid) else {
-                                    let _ = send_worker_protocol_error(
-                                        wire_codec,
-                                        logger,
-                                        &connection,
-                                        worker_id,
-                                        &request_id,
-                                        "JOB_NOT_FOUND",
-                                        "enqueued job is missing in jobs pool",
-                                    );
-                                    continue;
-                                };
-
                                 let mut payload = PayloadMap::new();
                                 payload.insert(
                                     "jid".to_owned(),
-                                    rmpv::Value::String(job.job_id.clone().into()),
-                                );
-                                payload.insert(
-                                    "execution_start_at".to_owned(),
-                                    rmpv::Value::String(job.execution_start_at.to_rfc3339().into()),
-                                );
-                                payload.insert(
-                                    "attempts_so_far".to_owned(),
-                                    rmpv::Value::Integer((job.runtime.attempts_so_far as i64).into()),
+                                    rmpv::Value::String(format!("{queue_name}:{job_uuid}").into()),
                                 );
 
                                 match wire_codec

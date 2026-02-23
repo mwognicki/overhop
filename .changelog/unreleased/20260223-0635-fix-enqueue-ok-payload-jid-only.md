@@ -1,0 +1,3 @@
+- fixed `ENQUEUE` OK response payload to include only `jid` as required
+- removed extra runtime/job metadata fields from ENQUEUE response payload
+- aligned wire protocol draft with jid-only ENQUEUE success payload

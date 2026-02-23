@@ -274,8 +274,6 @@ Response:
 
 - success: `OK` (`t=101`) payload with:
   - `jid` (`string`): generated job id (`<queue-name>:<uuid>`)
-  - `execution_start_at` (`string`, RFC3339): resolved earliest execution time
-  - `attempts_so_far` (`int`): runtime attempts counter (initially `0`)
 - failure: `ERR` (`t=102`) with standard error payload
 
 Constraints:
