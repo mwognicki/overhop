@@ -302,6 +302,25 @@ Constraints:
 - jobs on system queues (`_` prefix) cannot be accessed through this flow
 - jid parsing/validation is routed through jobs pool module while data load is direct from storage
 
+### RMJOB (worker client -> server)
+
+- Message type: `t=16`
+- Allowed only for registered workers.
+- Payload:
+  - `jid` (`string`, required): full job id (`<queue-name>:<uuid>`)
+
+Response:
+
+- success: `OK` (`t=101`) with empty payload
+- failure: `ERR` (`t=102`) with standard error payload
+
+Constraints:
+
+- job must exist for the provided `jid`
+- jobs on system queues (`_` prefix) cannot be removed through this flow
+- removable statuses are only: `delayed`, `new`, `failed`, `completed`
+- removal must permanently delete primary key and related indexes from persistence
+
 ## Implemented Worker Subscription Flow
 
 ### SUBSCRIBE (worker client -> server)

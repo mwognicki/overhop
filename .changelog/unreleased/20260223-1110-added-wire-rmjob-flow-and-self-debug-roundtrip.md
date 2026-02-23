@@ -1,0 +1,5 @@
+- added worker wire message `RMJOB` (`t=16`) with `jid` payload parsing/validation and runtime handling
+- implemented persisted-job removal flow with status guard (`delayed|new|failed|completed`) and storage-backed permanent key/index deletion
+- extended storage facade/backend with job-record deletion operation and sled index cleanup on delete
+- extended self-debug flow with final `ENQUEUE` followed by `RMJOB` for the same `jid`
+- updated wire/session/self-debug docs and LLM context for `RMJOB`

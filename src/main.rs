@@ -1220,6 +1220,153 @@ fn process_worker_client_messages(
                             }
                         }
                     }
+                    Ok(WorkerProtocolAction::RemoveJobRequested { request_id, job_id }) => {
+                        let lookup = match jobs_pool.lock() {
+                            Ok(guard) => match guard.resolve_job_lookup(&job_id) {
+                                Ok(lookup) => lookup,
+                                Err(error) => {
+                                    let (code, message) =
+                                        map_jobs_pool_error_for_worker_error(&error);
+                                    let _ = send_worker_protocol_error(
+                                        wire_codec,
+                                        logger,
+                                        &connection,
+                                        worker_id,
+                                        &request_id,
+                                        code,
+                                        &message,
+                                    );
+                                    continue;
+                                }
+                            },
+                            Err(_) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOBS_POOL_LOCK_POISONED",
+                                    "jobs pool lock poisoned while resolving job lookup",
+                                );
+                                continue;
+                            }
+                        };
+
+                        let record = match storage.get_job_payload_by_uuid(lookup.job_uuid) {
+                            Ok(record) => record,
+                            Err(error) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOB_PERSISTENCE_ERROR",
+                                    &format!("failed to load job by id from storage: {error}"),
+                                );
+                                continue;
+                            }
+                        };
+
+                        let Some(record) = record else {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "JOB_NOT_FOUND",
+                                "job not found for provided jid",
+                            );
+                            continue;
+                        };
+
+                        let stored_jid = record
+                            .get("jid")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default();
+                        if stored_jid != job_id {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "JOB_NOT_FOUND",
+                                "job not found for provided jid",
+                            );
+                            continue;
+                        }
+
+                        let status = record
+                            .get("status")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("new");
+                        if !can_remove_job_by_status(status) {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "JOB_STATUS_NOT_REMOVABLE",
+                                &format!(
+                                    "job status '{status}' cannot be removed; allowed statuses: delayed,new,failed,completed"
+                                ),
+                            );
+                            continue;
+                        }
+
+                        match storage.remove_job_record(lookup.job_uuid) {
+                            Ok(true) => {
+                                match wire_codec
+                                    .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                                {
+                                    Ok(frame) => {
+                                        write_response_frame(
+                                            &connection,
+                                            &frame,
+                                            connection.id(),
+                                            logger,
+                                            "RMJOB OK response",
+                                        );
+                                        let _ = pools.workers.touch_now(worker_id);
+                                    }
+                                    Err(error) => {
+                                        logger.warn(
+                                            Some("main::wire"),
+                                            &format!(
+                                                "failed to build RMJOB response for worker {worker_id}: {error}"
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(false) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOB_NOT_FOUND",
+                                    "job not found for provided jid",
+                                );
+                            }
+                            Err(error) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOB_REMOVE_FAILED",
+                                    &format!("failed to remove job from storage: {error}"),
+                                );
+                            }
+                        }
+                    }
                     Ok(WorkerProtocolAction::RemoveQueueRequested {
                         request_id,
                         queue_name,
@@ -2180,6 +2327,10 @@ fn job_status_to_str(status: JobStatus) -> &'static str {
         JobStatus::Waiting => "waiting",
         JobStatus::Delayed => "delayed",
     }
+}
+
+fn can_remove_job_by_status(status: &str) -> bool {
+    matches!(status, "delayed" | "new" | "failed" | "completed")
 }
 
 fn queue_metadata_payload(queue: &Queue) -> PayloadMap {

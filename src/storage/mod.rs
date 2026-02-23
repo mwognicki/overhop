@@ -231,4 +231,56 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(path);
     }
+
+    #[test]
+    fn remove_job_record_removes_primary_and_indexes() {
+        let path = unique_temp_path("job-remove");
+        let storage = test_storage(&path);
+
+        let created_at = chrono::Utc::now() - chrono::Duration::seconds(1);
+        let job_uuid = uuid::Uuid::new_v4();
+        let record = serde_json::json!({
+            "uuid": job_uuid.to_string(),
+            "jid": format!("alpha:{job_uuid}"),
+            "queue_name": "alpha",
+            "status": "new",
+            "execution_start_at": created_at.to_rfc3339(),
+            "created_at": created_at.to_rfc3339(),
+        });
+        storage
+            .upsert_job_record(
+                job_uuid,
+                &record,
+                created_at.timestamp_millis(),
+                created_at.timestamp_millis(),
+                "alpha",
+                "new",
+            )
+            .expect("job upsert should work");
+
+        let removed = storage
+            .remove_job_record(job_uuid)
+            .expect("job remove should work");
+        assert!(removed);
+        assert!(
+            storage
+                .get_job_payload_by_uuid(job_uuid)
+                .expect("job lookup should work")
+                .is_none()
+        );
+        assert!(
+            !storage
+                .list_job_uuids_by_status("new")
+                .expect("status lookup should work")
+                .contains(&job_uuid)
+        );
+        assert!(
+            !storage
+                .list_job_uuids_by_status_fifo("new")
+                .expect("status fifo lookup should work")
+                .contains(&job_uuid)
+        );
+
+        let _ = std::fs::remove_dir_all(path);
+    }
 }
