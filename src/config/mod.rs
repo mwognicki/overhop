@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process;
 
 use serde::{Deserialize, Serialize};
 use toml::Value;
@@ -198,6 +199,16 @@ impl AppConfig {
         }
 
         root_value.try_into().map_err(ConfigError::Deserialize)
+    }
+}
+
+pub fn load_or_exit(args: Vec<String>) -> AppConfig {
+    match AppConfig::load_with_discovery(args) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            process::exit(2);
+        }
     }
 }
 

@@ -23,6 +23,11 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Supports worker subscription flow requests (`SUBSCRIBE`, `UNSUBSCRIBE`) parsing/validation.
 - Supports worker credit increment request (`CREDIT`) parsing/validation.
 - Supports worker diagnostics snapshot request (`STATUS`) parsing/validation.
+- Provides dedicated runtime handlers in `src/wire/session/runtime.rs` for:
+  - anonymous connection frame processing and promotion flow
+  - worker message processing and command execution routing
+  - heartbeat-driven anonymous lifecycle purge and IDENT timeout enforcement
+  - wire response writing and protocol error response helpers
 
 ## Most Relevant Features
 
