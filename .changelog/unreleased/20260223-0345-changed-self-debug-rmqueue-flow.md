@@ -1,0 +1,3 @@
+- extended self-debug wire scenario to include `RMQUEUE` round-trip after unsubscribe
+- adjusted self-debug temporary queue naming to avoid `_` prefix so queue removal validation can pass
+- updated self-debug module README to reflect `RMQUEUE` coverage

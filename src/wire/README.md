@@ -20,6 +20,7 @@ Provide transport-level wire protocol building blocks while keeping framing/seri
   - includes worker `PING/PONG` request-response helpers
   - includes worker `QUEUE/LSQUEUE` query message parsing helpers
   - includes worker `ADDQUEUE` queue-creation message parsing helpers
+  - includes worker `RMQUEUE` queue-removal message parsing helpers
   - includes worker `SUBSCRIBE/UNSUBSCRIBE` subscription message parsing helpers
   - includes worker `CREDIT` subscription credit increment parsing helpers
   - includes worker `STATUS` diagnostics snapshot message parsing helpers

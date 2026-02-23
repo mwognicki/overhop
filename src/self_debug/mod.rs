@@ -14,8 +14,8 @@ use crate::wire::envelope::{PayloadMap, WireEnvelope};
 use crate::wire::handshake::HELLO_MESSAGE_TYPE;
 use crate::wire::session::{
     ADDQUEUE_MESSAGE_TYPE, CREDIT_MESSAGE_TYPE, LSQUEUE_MESSAGE_TYPE, PING_MESSAGE_TYPE,
-    QUEUE_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE,
-    UNSUBSCRIBE_MESSAGE_TYPE,
+    QUEUE_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, STATUS_MESSAGE_TYPE,
+    SUBSCRIBE_MESSAGE_TYPE, UNSUBSCRIBE_MESSAGE_TYPE,
 };
 
 const COLOR_HEADER: &str = "\x1b[38;5;214m";
@@ -139,7 +139,7 @@ pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebu
 
     let mut addqueue_payload = PayloadMap::new();
     let queue_name = format!(
-        "_self_debug_{}",
+        "self_debug_{}",
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
     );
     addqueue_payload.insert("name".to_owned(), Value::String(queue_name.clone().into()));
@@ -174,7 +174,7 @@ pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebu
     )?;
 
     let mut subscribe_payload = PayloadMap::new();
-    subscribe_payload.insert("q".to_owned(), Value::String(queue_name.into()));
+    subscribe_payload.insert("q".to_owned(), Value::String(queue_name.clone().into()));
     subscribe_payload.insert("credits".to_owned(), Value::Integer(1_i64.into()));
     let subscribe = send_and_receive(
         &mut stream,
@@ -220,6 +220,30 @@ pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebu
         UNSUBSCRIBE_MESSAGE_TYPE,
         "sd-10",
         unsubscribe_payload,
+    )?;
+
+    let mut rmqueue_payload = PayloadMap::new();
+    rmqueue_payload.insert("q".to_owned(), Value::String(queue_name.clone().into()));
+    let _ = send_and_receive(
+        &mut stream,
+        &codec,
+        RMQUEUE_MESSAGE_TYPE,
+        "sd-11",
+        rmqueue_payload,
+    )?;
+
+    let mut addqueue_persisted_payload = PayloadMap::new();
+    let persisted_queue_name = format!(
+        "self_debug_persisted_{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    );
+    addqueue_persisted_payload.insert("name".to_owned(), Value::String(persisted_queue_name.into()));
+    let _ = send_and_receive(
+        &mut stream,
+        &codec,
+        ADDQUEUE_MESSAGE_TYPE,
+        "sd-12",
+        addqueue_persisted_payload,
     )?;
 
     println!("{COLOR_HEADER}====== SELF DEBUG MODE COMPLETE ======{RESET}");
@@ -355,6 +379,7 @@ fn message_type_name(message_type: i64) -> &'static str {
         UNSUBSCRIBE_MESSAGE_TYPE => "UNSUBSCRIBE",
         CREDIT_MESSAGE_TYPE => "CREDIT",
         ADDQUEUE_MESSAGE_TYPE => "ADDQUEUE",
+        RMQUEUE_MESSAGE_TYPE => "RMQUEUE",
         STATUS_MESSAGE_TYPE => "STATUS",
         crate::wire::envelope::SERVER_OK_MESSAGE_TYPE => "OK",
         crate::wire::envelope::SERVER_ERR_MESSAGE_TYPE => "ERR",

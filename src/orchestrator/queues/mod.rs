@@ -70,6 +70,7 @@ pub struct QueuePoolSnapshot {
 pub enum QueuePoolError {
     DuplicateQueueName { name: String },
     QueueNotFound { name: String },
+    SystemQueueRemovalForbidden { name: String },
     Serialize(serde_json::Error),
     Deserialize(serde_json::Error),
 }
@@ -81,6 +82,9 @@ impl fmt::Display for QueuePoolError {
                 write!(f, "queue '{name}' is already registered")
             }
             Self::QueueNotFound { name } => write!(f, "queue '{name}' not found"),
+            Self::SystemQueueRemovalForbidden { name } => {
+                write!(f, "queue '{name}' is a system queue and cannot be removed")
+            }
             Self::Serialize(source) => write!(f, "failed to serialize queue pool: {source}"),
             Self::Deserialize(source) => write!(f, "failed to deserialize queue pool: {source}"),
         }
@@ -164,6 +168,21 @@ impl QueuePool {
 
     pub fn get_queue(&self, name: &str) -> Option<&Queue> {
         self.queues.get(name)
+    }
+
+    pub fn remove_queue(&mut self, name: &str) -> Result<(), QueuePoolError> {
+        if name.starts_with('_') {
+            return Err(QueuePoolError::SystemQueueRemovalForbidden {
+                name: name.to_owned(),
+            });
+        }
+
+        self.queues
+            .remove(name)
+            .map(|_| ())
+            .ok_or_else(|| QueuePoolError::QueueNotFound {
+                name: name.to_owned(),
+            })
     }
 
     pub fn list_queues(&self) -> Vec<&Queue> {
@@ -300,5 +319,26 @@ mod tests {
 
         pool.mark_bootstrapped();
         assert!(pool.is_bootstrapped());
+    }
+
+    #[test]
+    fn remove_queue_rejects_system_queue_and_removes_regular_queue() {
+        let mut pool = QueuePool::new();
+        pool.register_queue("_system", None)
+            .expect("system queue should register");
+        pool.register_queue("critical", None)
+            .expect("critical queue should register");
+
+        let err = pool
+            .remove_queue("_system")
+            .expect_err("system queue removal should fail");
+        assert!(matches!(
+            err,
+            QueuePoolError::SystemQueueRemovalForbidden { .. }
+        ));
+
+        pool.remove_queue("critical")
+            .expect("regular queue removal should pass");
+        assert!(pool.get_queue("critical").is_none());
     }
 }
