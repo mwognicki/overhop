@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use chrono::DateTime;
 use uuid::Uuid;
 
 use crate::orchestrator::queues::Queue;
@@ -13,6 +14,7 @@ pub struct SledStorage {
 const KEYSPACE_VERSION: &str = "v1";
 const QUEUE_PREFIX: &[u8] = b"v1:q:";
 const JOB_STATUS_PREFIX: &[u8] = b"v1:status:";
+const JOB_STATUS_FIFO_PREFIX: &[u8] = b"v1:status_fifo:";
 
 impl SledStorage {
     pub fn open(
@@ -58,6 +60,33 @@ fn job_status_key(job_uuid: Uuid) -> Vec<u8> {
     key.extend_from_slice(JOB_STATUS_PREFIX);
     key.extend_from_slice(job_uuid.to_string().as_bytes());
     key
+}
+
+fn i64_to_ordered_be_bytes(value: i64) -> [u8; 8] {
+    let sortable = (value as u64) ^ (1_u64 << 63);
+    sortable.to_be_bytes()
+}
+
+fn job_status_fifo_prefix(status: &str) -> Vec<u8> {
+    let mut prefix = Vec::with_capacity(JOB_STATUS_FIFO_PREFIX.len() + status.len() + 1);
+    prefix.extend_from_slice(JOB_STATUS_FIFO_PREFIX);
+    prefix.extend_from_slice(status.as_bytes());
+    prefix.push(b':');
+    prefix
+}
+
+fn job_status_fifo_key(status: &str, created_at_ms: i64, job_uuid: Uuid) -> Vec<u8> {
+    let mut key = job_status_fifo_prefix(status);
+    key.extend_from_slice(&i64_to_ordered_be_bytes(created_at_ms));
+    key.extend_from_slice(job_uuid.as_bytes());
+    key
+}
+
+fn parse_rfc3339_timestamp_ms(value: &serde_json::Value, field: &str) -> Option<i64> {
+    let raw = value.get(field)?.as_str()?;
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|parsed| parsed.timestamp_millis())
 }
 
 impl StorageBackend for SledStorage {
@@ -111,27 +140,75 @@ impl StorageBackend for SledStorage {
         Ok(uuids)
     }
 
+    fn list_job_uuids_by_status_fifo(&self, status: &str) -> Result<Vec<Uuid>, StorageError> {
+        let mut uuids = Vec::new();
+        let prefix = job_status_fifo_prefix(status);
+        for entry in self.db.scan_prefix(prefix.clone()) {
+            let (key, _) = entry.map_err(StorageError::Sled)?;
+            let key_ref = key.as_ref();
+            if key_ref.len() != prefix.len() + 8 + 16 {
+                continue;
+            }
+            let uuid_offset = prefix.len() + 8;
+            if let Ok(uuid) = Uuid::from_slice(&key_ref[uuid_offset..uuid_offset + 16]) {
+                uuids.push(uuid);
+            }
+        }
+        Ok(uuids)
+    }
+
     fn upsert_job_record(
         &self,
         job_uuid: Uuid,
         record: &serde_json::Value,
         execution_start_ms: i64,
+        created_at_ms: i64,
         queue_name: &str,
         status: &str,
     ) -> Result<(), StorageError> {
         let primary_key = job_key(job_uuid);
         let queue_time_key = job_queue_time_key(execution_start_ms, queue_name, job_uuid);
         let status_key = job_status_key(job_uuid);
+        let status_fifo_key = job_status_fifo_key(status, created_at_ms, job_uuid);
         let raw = serde_json::to_vec(record).map_err(StorageError::SerializeJob)?;
-        self.db
-            .insert(primary_key.as_bytes(), raw)
-            .map_err(StorageError::Sled)?;
-        self.db
-            .insert(queue_time_key, &[1_u8])
-            .map_err(StorageError::Sled)?;
-        self.db
-            .insert(status_key, status.as_bytes())
-            .map_err(StorageError::Sled)?;
+
+        let mut batch = sled::Batch::default();
+        if let Some(existing_raw) = self.db.get(primary_key.as_bytes()).map_err(StorageError::Sled)? {
+            if let Ok(existing) = serde_json::from_slice::<serde_json::Value>(existing_raw.as_ref()) {
+                let existing_status = existing
+                    .get("status")
+                    .and_then(serde_json::Value::as_str);
+                let existing_created_at_ms = parse_rfc3339_timestamp_ms(&existing, "created_at");
+                if let (Some(existing_status), Some(existing_created_at_ms)) =
+                    (existing_status, existing_created_at_ms)
+                {
+                    batch.remove(job_status_fifo_key(
+                        existing_status,
+                        existing_created_at_ms,
+                        job_uuid,
+                    ));
+                }
+
+                let existing_queue_name = existing.get("queue_name").and_then(serde_json::Value::as_str);
+                let existing_execution_start_ms =
+                    parse_rfc3339_timestamp_ms(&existing, "execution_start_at");
+                if let (Some(existing_queue_name), Some(existing_execution_start_ms)) =
+                    (existing_queue_name, existing_execution_start_ms)
+                {
+                    batch.remove(job_queue_time_key(
+                        existing_execution_start_ms,
+                        existing_queue_name,
+                        job_uuid,
+                    ));
+                }
+            }
+        }
+
+        batch.insert(primary_key.as_bytes(), raw);
+        batch.insert(queue_time_key, &[1_u8]);
+        batch.insert(status_key, status.as_bytes());
+        batch.insert(status_fifo_key, &[1_u8]);
+        self.db.apply_batch(batch).map_err(StorageError::Sled)?;
         self.db.flush().map_err(StorageError::Sled)?;
         Ok(())
     }

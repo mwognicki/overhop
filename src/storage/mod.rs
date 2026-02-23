@@ -111,15 +111,24 @@ mod tests {
         let storage = test_storage(&path);
 
         let job_uuid = uuid::Uuid::new_v4();
+        let created_at = chrono::Utc::now();
         let record = serde_json::json!({
             "uuid": job_uuid.to_string(),
             "jid": format!("critical:{job_uuid}"),
             "queue_name": "critical",
             "status": "new",
             "execution_start_at": chrono::Utc::now().to_rfc3339(),
+            "created_at": created_at.to_rfc3339(),
         });
         storage
-            .upsert_job_record(job_uuid, &record, chrono::Utc::now().timestamp_millis(), "critical", "new")
+            .upsert_job_record(
+                job_uuid,
+                &record,
+                chrono::Utc::now().timestamp_millis(),
+                created_at.timestamp_millis(),
+                "critical",
+                "new",
+            )
             .expect("job upsert should work");
 
         let new_jobs = storage
@@ -134,6 +143,7 @@ mod tests {
                 job_uuid,
                 &updated,
                 chrono::Utc::now().timestamp_millis(),
+                created_at.timestamp_millis(),
                 "critical",
                 "waiting",
             )
@@ -142,6 +152,82 @@ mod tests {
             .list_job_uuids_by_status("waiting")
             .expect("waiting status query should work");
         assert!(waiting_jobs.contains(&job_uuid));
+
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn waiting_status_fifo_index_orders_by_created_at_ascending() {
+        let path = unique_temp_path("job-status-fifo");
+        let storage = test_storage(&path);
+
+        let created_a = chrono::Utc::now() - chrono::Duration::seconds(3);
+        let created_b = chrono::Utc::now() - chrono::Duration::seconds(2);
+        let created_c = chrono::Utc::now() - chrono::Duration::seconds(1);
+        let uuid_a = uuid::Uuid::new_v4();
+        let uuid_b = uuid::Uuid::new_v4();
+        let uuid_c = uuid::Uuid::new_v4();
+
+        let record_a = serde_json::json!({
+            "uuid": uuid_a.to_string(),
+            "jid": format!("alpha:{uuid_a}"),
+            "queue_name": "alpha",
+            "status": "waiting",
+            "execution_start_at": created_a.to_rfc3339(),
+            "created_at": created_a.to_rfc3339(),
+        });
+        let record_b = serde_json::json!({
+            "uuid": uuid_b.to_string(),
+            "jid": format!("alpha:{uuid_b}"),
+            "queue_name": "alpha",
+            "status": "waiting",
+            "execution_start_at": created_b.to_rfc3339(),
+            "created_at": created_b.to_rfc3339(),
+        });
+        let record_c = serde_json::json!({
+            "uuid": uuid_c.to_string(),
+            "jid": format!("alpha:{uuid_c}"),
+            "queue_name": "alpha",
+            "status": "waiting",
+            "execution_start_at": created_c.to_rfc3339(),
+            "created_at": created_c.to_rfc3339(),
+        });
+
+        storage
+            .upsert_job_record(
+                uuid_c,
+                &record_c,
+                created_c.timestamp_millis(),
+                created_c.timestamp_millis(),
+                "alpha",
+                "waiting",
+            )
+            .expect("upsert c should work");
+        storage
+            .upsert_job_record(
+                uuid_a,
+                &record_a,
+                created_a.timestamp_millis(),
+                created_a.timestamp_millis(),
+                "alpha",
+                "waiting",
+            )
+            .expect("upsert a should work");
+        storage
+            .upsert_job_record(
+                uuid_b,
+                &record_b,
+                created_b.timestamp_millis(),
+                created_b.timestamp_millis(),
+                "alpha",
+                "waiting",
+            )
+            .expect("upsert b should work");
+
+        let ordered = storage
+            .list_job_uuids_by_status_fifo("waiting")
+            .expect("fifo status query should work");
+        assert_eq!(ordered, vec![uuid_a, uuid_b, uuid_c]);
 
         let _ = std::fs::remove_dir_all(path);
     }

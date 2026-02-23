@@ -187,6 +187,12 @@ fn main() {
         else {
             return Err("job persist event missing i64 'execution_start_ms'".to_owned());
         };
+        let Some(created_at_ms) = payload
+            .get("created_at_ms")
+            .and_then(serde_json::Value::as_i64)
+        else {
+            return Err("job persist event missing i64 'created_at_ms'".to_owned());
+        };
         let Some(queue_name) = payload.get("queue_name").and_then(serde_json::Value::as_str) else {
             return Err("job persist event missing string 'queue_name'".to_owned());
         };
@@ -195,7 +201,7 @@ fn main() {
         };
 
         storage_for_job_persist
-            .upsert_job_record(job_uuid, record, execution_start_ms, queue_name, status)
+            .upsert_job_record(job_uuid, record, execution_start_ms, created_at_ms, queue_name, status)
             .map_err(|error| error.to_string())?;
 
         let mut guard = jobs_pool_for_persist
@@ -1911,6 +1917,7 @@ fn drain_transient_jobs_pool_before_exit(
                     job.uuid,
                     &record,
                     job.execution_start_at.timestamp_millis(),
+                    job.created_at.timestamp_millis(),
                     &job.queue_name,
                     job_status_to_str(job.status),
                 )
@@ -1979,6 +1986,7 @@ fn build_job_persist_event_payload(job: &Job) -> serde_json::Value {
         "job_uuid": job.uuid.to_string(),
         "record": build_job_record_json(job),
         "execution_start_ms": job.execution_start_at.timestamp_millis(),
+        "created_at_ms": job.created_at.timestamp_millis(),
         "queue_name": job.queue_name,
         "status": job_status_to_str(job.status),
     })
@@ -2089,6 +2097,9 @@ fn apply_persisted_job_status_transition(
             job_uuid,
             &record,
             execution_start_at.timestamp_millis(),
+            extract_created_at(&record)
+                .map(|timestamp| timestamp.timestamp_millis())
+                .unwrap_or_else(|| Utc::now().timestamp_millis()),
             &queue_name,
             target_status_str,
         )
@@ -2098,6 +2109,13 @@ fn apply_persisted_job_status_transition(
 
 fn extract_execution_start_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
     let raw = record.get("execution_start_at")?.as_str()?;
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
+fn extract_created_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
+    let raw = record.get("created_at")?.as_str()?;
     DateTime::parse_from_rfc3339(raw)
         .ok()
         .map(|value| value.with_timezone(&Utc))

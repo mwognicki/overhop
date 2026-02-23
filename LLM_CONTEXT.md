@@ -89,6 +89,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Job IDs must follow `<queue-name>:<job-uuid>` while enqueue API returns the generated job UUID.
    - Default new-job status is `new`, and execution start timestamp must be `scheduled_at` or immediate time.
    - Job runtime metadata must include `attempts_so_far`, initialized as `0` on job creation.
+   - Jobs must be stamped with immutable `created_at` at transient staging time and persisted with the job record.
    - Optional retry interval must be strictly positive when provided.
    - Jobs pool is transient staging only; enqueue stages in memory, emits persistence event, and successful persistence must evict staged job from pool.
    - Shutdown should best-effort flush remaining staged jobs to persistence before exit, and pause briefly (100 ms) after pool drain.
@@ -99,7 +100,8 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep storage initialization fail-fast before TCP server startup.
    - Keep default data path rooted at `~/.overhop/data` with `~/` and `$HOME/` expansion support.
    - Keep engine-specific details behind storage backend abstractions so domain logic stays engine-agnostic.
-   - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` primary jobs, `v1:j_qt:` queue-time job index, `v1:status:` job status key).
+   - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` primary jobs, `v1:j_qt:` queue-time job index, `v1:status:` job status key, `v1:status_fifo:` status FIFO index ordered by `created_at`).
+   - Keep ordered numeric key fragments encoded in big-endian sortable form for sled iterator correctness.
    - Keep storage abstraction and concrete engine implementations separated into dedicated files/modules.
 24. Persistent queue bootstrap flow is implemented in `src/orchestrator/queues/persistent.rs`:
    - On first run, persist and preload `_system` queue.
