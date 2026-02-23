@@ -6,11 +6,20 @@ A server-side queue orchestration system built in Rust — exploring strict conc
 
 This repository is both a technical project and a research log.
 
+## EXPERIMENTAL DISCLAIMER
+
+# THIS IS AN EXPERIMENTAL PROJECT.
+# THIS REPOSITORY IS NOT INTENDED (AT LEAST FOR NOW) TO BE A RUST CODE ROLE MODEL OR SPECIMEN.
+# IT IS A RESEARCH AREA FOR FINDING THE MOST PERFORMANT AND EFFICIENT WAYS TO USE LLM CODING ASSISTANTS IN FAULT-CRITICAL APPLICATIONS.
+
 ## Table of Contents
 
+- [EXPERIMENTAL DISCLAIMER](#experimental-disclaimer)
 - [Why This Exists](#why-this-exists)
 - [Core Idea](#core-idea)
 - [Objectives](#objectives)
+- [Observation Reports](#observation-reports)
+- [Deliberate Imperfections](#deliberate-imperfections)
 - [Repository Navigation](#repository-navigation)
 - [Changelog and Commit Discipline](#changelog-and-commit-discipline)
 - [Branch and PR Flow](#branch-and-pr-flow)
@@ -25,6 +34,7 @@ This repository is both a technical project and a research log.
 - [The Wire Protocol](#the-wire-protocol)
 - [Storage Backend](#storage-backend)
 - [Clients](#clients)
+- [Dependencies](#dependencies)
 - [Why Rust?](#why-rust)
 - [What This Is (and Isn't)](#what-this-is-and-isnt)
 - [Contributions](#contributions)
@@ -62,6 +72,14 @@ No HTTP. No gRPC. A purpose-built protocol, designed incrementally alongside the
 This is an experimental project, but it's not aimed at undermining LLMs or proving they can't be trusted. The main objective is the opposite: to use LLMs in a disciplined, structured way such that Overhop could become production-ready software one day.
 
 That shapes everything about how the project is developed. It isn't a quick prototype or a throwaway research spike. It's built with proper documentation, changelogs, and CI/CD tooling from the start — because the experiment only means something if the output is something worth shipping.
+
+## Observation Reports
+
+Regular reports from ongoing observations are currently maintained in the repository Wiki.
+
+## Deliberate Imperfections
+
+Some imperfections are intentionally left in the repository as a playground for refining interaction strategies with LLM coding assistants.
 
 ## Repository Navigation
 
@@ -204,6 +222,30 @@ LLMs are useful here for comparative analysis, though they tend to reach for Red
 ### Clients
 
 The plan is to write four client implementations: TypeScript, Python, Go, and Rust. This will test protocol clarity, cross-language ergonomics, and API surface consistency. The server remains single-node for now — no clustering.
+
+## Dependencies
+
+These dependencies are deliberate choices made for current architecture, protocol, and experimentation goals.
+
+![chrono](https://img.shields.io/badge/chrono-0.4.40-1f6feb?style=for-the-badge)
+![serde](https://img.shields.io/badge/serde-1.0.228-1f6feb?style=for-the-badge)
+![serde_json](https://img.shields.io/badge/serde__json-1.0.140-1f6feb?style=for-the-badge)
+![signal-hook](https://img.shields.io/badge/signal--hook-0.3.18-1f6feb?style=for-the-badge)
+![toml](https://img.shields.io/badge/toml-0.8.23-1f6feb?style=for-the-badge)
+![rmpv](https://img.shields.io/badge/rmpv-1.3.0-1f6feb?style=for-the-badge)
+![uuid](https://img.shields.io/badge/uuid-1.18.1-1f6feb?style=for-the-badge)
+![sled](https://img.shields.io/badge/sled-0.34.7-1f6feb?style=for-the-badge)
+
+| Crate | Version | Purpose |
+| --- | --- | --- |
+| `chrono` | `0.4.40` | UTC timestamps, RFC3339 formatting, scheduling/status timing logic |
+| `serde` | `1.0.228` | Serialization framework for config/domain data |
+| `serde_json` | `1.0.140` | JSON payload/value handling and persistence records |
+| `signal-hook` | `0.3.18` | POSIX signal handling for graceful shutdown hooks |
+| `toml` | `0.8.23` | Config parsing and typed config override processing |
+| `rmpv` | `1.3.0` | MessagePack value model and frame payload encoding/decoding |
+| `uuid` | `1.18.1` | Worker/job/subscription identifiers (`v4`, serde-enabled) |
+| `sled` | `0.34.7` | Embedded key-value storage backend for queue/job persistence |
 
 ## Why Rust?
 
