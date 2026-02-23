@@ -1,0 +1,3 @@
+- extended self-debug terminal sequence with `LSJOB` request inserted between final `ENQUEUE` and `RMJOB`
+- added `LSJOB` message-type label mapping in self-debug output decoder
+- updated self-debug module README to reflect final `ENQUEUE -> LSJOB -> RMJOB` verification order

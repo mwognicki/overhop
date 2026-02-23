@@ -157,6 +157,61 @@ impl StorageBackend for SledStorage {
         Ok(uuids)
     }
 
+    fn list_job_records_by_queue_and_status(
+        &self,
+        queue_name: &str,
+        status: &str,
+        page: u32,
+        page_size: u32,
+    ) -> Result<Vec<serde_json::Value>, StorageError> {
+        let page_index = page.saturating_sub(1) as usize;
+        let page_size = page_size as usize;
+        let offset = page_index.saturating_mul(page_size);
+        let prefix = job_status_fifo_prefix(status);
+        let mut jobs = Vec::new();
+        let mut matched = 0usize;
+
+        for entry in self.db.scan_prefix(prefix.clone()) {
+            let (key, _) = entry.map_err(StorageError::Sled)?;
+            let key_ref = key.as_ref();
+            if key_ref.len() != prefix.len() + 8 + 16 {
+                continue;
+            }
+            let uuid_offset = prefix.len() + 8;
+            let Ok(job_uuid) = Uuid::from_slice(&key_ref[uuid_offset..uuid_offset + 16]) else {
+                continue;
+            };
+
+            let Some(raw_record) = self.db.get(job_key(job_uuid).as_bytes()).map_err(StorageError::Sled)? else {
+                continue;
+            };
+            let record = serde_json::from_slice::<serde_json::Value>(raw_record.as_ref())
+                .map_err(StorageError::DeserializeJob)?;
+            let record_queue_name = record
+                .get("queue_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let record_status = record
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if record_queue_name != queue_name || record_status != status {
+                continue;
+            }
+            if matched < offset {
+                matched += 1;
+                continue;
+            }
+            if jobs.len() >= page_size {
+                break;
+            }
+            jobs.push(record);
+            matched += 1;
+        }
+
+        Ok(jobs)
+    }
+
     fn upsert_job_record(
         &self,
         job_uuid: Uuid,

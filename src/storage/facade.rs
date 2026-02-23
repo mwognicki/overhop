@@ -112,6 +112,17 @@ impl StorageFacade {
         self.backend.list_job_uuids_by_status_fifo(status)
     }
 
+    pub fn list_job_records_by_queue_and_status(
+        &self,
+        queue_name: &str,
+        status: &str,
+        page: u32,
+        page_size: u32,
+    ) -> Result<Vec<serde_json::Value>, StorageError> {
+        self.backend
+            .list_job_records_by_queue_and_status(queue_name, status, page, page_size)
+    }
+
     pub fn upsert_job_record(
         &self,
         job_uuid: Uuid,

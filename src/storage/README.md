@@ -50,5 +50,6 @@ Provide a pluggable storage facade so business/domain modules depend on stable s
   - `storage.sled.mode` (`low_space` or `high_throughput`, optional)
 - Queue persistence supports full-set replacement (`replace_queues`) for deterministic persist-first/reload flows.
 - Job persistence supports upsert by UUID (`upsert_job_record`) for enqueue flows.
+- Job retrieval supports status FIFO scans and queue+status paginated listing over persisted records.
 - Significant initialization events are logged from this module.
 - Initialization errors are surfaced to startup flow and terminate application startup.

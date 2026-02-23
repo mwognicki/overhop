@@ -35,6 +35,10 @@ helloed_unregistered_max_lifetime_seconds = 10
 # Timeout (seconds) to send REGISTER after IDENT is issued
 ident_register_timeout_seconds = 2
 
+[pagination]
+# Default page size used by paginated wire flows (e.g. LSJOB)
+page_size = 15
+
 [storage]
 # Currently fixed to: sled
 engine = "sled"

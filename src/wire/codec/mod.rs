@@ -324,7 +324,8 @@ mod tests {
         MIN_MAX_ENVELOPE_SIZE_BYTES,
     };
     use crate::config::{
-        AppConfig, HeartbeatConfig, LoggingConfig, ServerConfig, StorageConfig, WireSessionConfig,
+        AppConfig, HeartbeatConfig, LoggingConfig, PaginationConfig, ServerConfig, StorageConfig,
+        WireSessionConfig,
         WireConfig as AppWireConfig,
     };
     use rmpv::Value;
@@ -481,6 +482,7 @@ mod tests {
                 max_envelope_size_bytes: 1_048_576,
                 session: WireSessionConfig::default(),
             },
+            pagination: PaginationConfig::default(),
             storage: StorageConfig::default(),
         };
 

@@ -10,6 +10,7 @@
 #   --wire.session.unhelloed_max_lifetime_seconds 10
 #   --wire.session.helloed_unregistered_max_lifetime_seconds 10
 #   --wire.session.ident_register_timeout_seconds 2
+#   --pagination.page_size 15
 #   --storage.engine sled
 #   --storage.path ~/.overhop/data
 #   --storage.self_debug_path ~/.overhop/data-self-debug
@@ -51,6 +52,10 @@ unhelloed_max_lifetime_seconds = 10
 helloed_unregistered_max_lifetime_seconds = 10
 # Allowed REGISTER timeout after IDENT challenge is sent
 ident_register_timeout_seconds = 2
+
+[pagination]
+# Default page size used by paginated wire flows (e.g. LSJOB)
+page_size = 15
 
 [storage]
 # Storage backend engine (currently hard-fixed to sled)

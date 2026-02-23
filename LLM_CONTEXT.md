@@ -35,6 +35,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep argv overrides generic using dotted key paths (`--section.key value`) without hardcoded flag mappings.
    - Keep config discovery precedence: `<binary-dir>/config.toml`, then `$HOME/.overhop/config.toml`, then `/etc/overhop/config.toml`.
    - Keep wire session timeout controls configurable under `wire.session.*` keys.
+   - Keep default pagination size configurable under `pagination.page_size` (default `15`).
    - Heartbeat maintenance cadence for anonymous wire lifecycle should equal min of wire session timeout controls.
 13. Heartbeat is implemented in `src/heartbeat/mod.rs`:
    - Keep interval bounds strict (`100..=1000` ms, default `1000`).
@@ -74,6 +75,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Registered workers may use ENQUEUE (`t=14`) to push jobs to non-system queues, with optional `job_payload`, `scheduled_at`, `max_attempts`, and `retry_interval_ms`.
    - Registered workers may use JOB (`t=15`, payload `jid`) to fetch persisted job records by id; system-queue jobs remain inaccessible.
    - Registered workers may use RMJOB (`t=16`, payload `jid`) to remove persisted jobs in statuses `delayed|new|failed|completed`; system-queue jobs remain inaccessible.
+   - Registered workers may use LSJOB (`t=17`, payload `q`, `status`, optional `page_size`, optional `page`) to list persisted jobs filtered by queue and status, ordered by `created_at` ascending.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Anonymous metadata should track optional IDENT reply deadline timestamp when IDENT challenge is issued.
