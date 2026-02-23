@@ -16,6 +16,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep fragment entries concise and release-note oriented.
 8. Use branch-based development flow:
    - Create and work on `feat/*`, `quickfix/*`, or `chore/*` branches.
+   - Treat `develop` as a long-lived integration branch; `develop` is NOT a feature branch.
    - Avoid direct pushes to `main`.
    - Prefer merging through PRs from topic branch to `main`.
    - Prefer generating PR body from `.changelog/unreleased` fragments via `scripts/generate_pr_body_from_changelog.sh` (or optional workflow `.github/workflows/pr-body-from-changelog.yml`).
