@@ -1,0 +1,3 @@
+- extended self-debug flow with appended `ENQUEUE` request round-up at the end of the scenario
+- ENQUEUE self-debug payload now exercises nested `job_payload`, past `scheduled_at`, `max_attempts`, and `retry_interval_ms`
+- self-debug now validates enqueue response contains generated `jid`
