@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use chrono::DateTime;
@@ -5,7 +6,7 @@ use uuid::Uuid;
 
 use crate::orchestrator::queues::Queue;
 
-use super::{SledMode, StorageBackend, StorageError};
+use super::{QueueStatusCount, SledMode, StorageBackend, StorageError};
 
 pub struct SledStorage {
     db: sled::Db,
@@ -15,6 +16,7 @@ const KEYSPACE_VERSION: &str = "v1";
 const QUEUE_PREFIX: &[u8] = b"v1:q:";
 const JOB_STATUS_PREFIX: &[u8] = b"v1:status:";
 const JOB_STATUS_FIFO_PREFIX: &[u8] = b"v1:status_fifo:";
+const QUEUE_STATUS_COUNT_PREFIX: &[u8] = b"v1:q_status:";
 
 impl SledStorage {
     pub fn open(
@@ -89,6 +91,64 @@ fn parse_rfc3339_timestamp_ms(value: &serde_json::Value, field: &str) -> Option<
         .map(|parsed| parsed.timestamp_millis())
 }
 
+fn queue_status_count_key(queue_name: &str, status: &str) -> Vec<u8> {
+    let mut key =
+        Vec::with_capacity(QUEUE_STATUS_COUNT_PREFIX.len() + queue_name.len() + 1 + status.len());
+    key.extend_from_slice(QUEUE_STATUS_COUNT_PREFIX);
+    key.extend_from_slice(queue_name.as_bytes());
+    key.push(b':');
+    key.extend_from_slice(status.as_bytes());
+    key
+}
+
+fn parse_queue_status_count_key(key: &[u8]) -> Option<(String, String)> {
+    if !key.starts_with(QUEUE_STATUS_COUNT_PREFIX) {
+        return None;
+    }
+    let suffix = &key[QUEUE_STATUS_COUNT_PREFIX.len()..];
+    let raw = std::str::from_utf8(suffix).ok()?;
+    let (queue_name, status) = raw.rsplit_once(':')?;
+    if queue_name.is_empty() || status.is_empty() {
+        return None;
+    }
+    Some((queue_name.to_owned(), status.to_owned()))
+}
+
+fn read_u64_be(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() != 8 {
+        return None;
+    }
+    let mut arr = [0_u8; 8];
+    arr.copy_from_slice(bytes);
+    Some(u64::from_be_bytes(arr))
+}
+
+fn apply_queue_status_count_deltas(
+    db: &sled::Db,
+    batch: &mut sled::Batch,
+    deltas: HashMap<(String, String), i64>,
+) -> Result<(), StorageError> {
+    for ((queue_name, status), delta) in deltas {
+        if delta == 0 {
+            continue;
+        }
+        let key = queue_status_count_key(&queue_name, &status);
+        let current = db
+            .get(&key)
+            .map_err(StorageError::Sled)?
+            .and_then(|value| read_u64_be(value.as_ref()))
+            .unwrap_or(0);
+        let updated = (current as i128) + (delta as i128);
+        if updated <= 0 {
+            batch.remove(key);
+            continue;
+        }
+        let next = updated as u64;
+        batch.insert(key, &next.to_be_bytes());
+    }
+    Ok(())
+}
+
 impl StorageBackend for SledStorage {
     fn flush(&self) -> Result<(), StorageError> {
         self.db.flush().map(|_| ()).map_err(StorageError::Sled)
@@ -155,6 +215,30 @@ impl StorageBackend for SledStorage {
             }
         }
         Ok(uuids)
+    }
+
+    fn list_queue_status_counts(&self) -> Result<Vec<QueueStatusCount>, StorageError> {
+        let mut stats = Vec::new();
+        for entry in self.db.scan_prefix(QUEUE_STATUS_COUNT_PREFIX) {
+            let (key, value) = entry.map_err(StorageError::Sled)?;
+            let Some((queue_name, status)) = parse_queue_status_count_key(key.as_ref()) else {
+                continue;
+            };
+            let Some(count) = read_u64_be(value.as_ref()) else {
+                continue;
+            };
+            stats.push(QueueStatusCount {
+                queue_name,
+                status,
+                count,
+            });
+        }
+        stats.sort_by(|a, b| {
+            a.queue_name
+                .cmp(&b.queue_name)
+                .then(a.status.cmp(&b.status))
+        });
+        Ok(stats)
     }
 
     fn list_job_records_by_queue_and_status(
@@ -228,6 +312,7 @@ impl StorageBackend for SledStorage {
         let raw = serde_json::to_vec(record).map_err(StorageError::SerializeJob)?;
 
         let mut batch = sled::Batch::default();
+        let mut queue_status_deltas = HashMap::<(String, String), i64>::new();
         if let Some(existing_raw) = self.db.get(primary_key.as_bytes()).map_err(StorageError::Sled)? {
             if let Ok(existing) = serde_json::from_slice::<serde_json::Value>(existing_raw.as_ref()) {
                 let existing_status = existing
@@ -256,13 +341,31 @@ impl StorageBackend for SledStorage {
                         job_uuid,
                     ));
                 }
+                if let (Some(existing_queue_name), Some(existing_status)) = (
+                    existing.get("queue_name").and_then(serde_json::Value::as_str),
+                    existing.get("status").and_then(serde_json::Value::as_str),
+                ) {
+                    if existing_queue_name != queue_name || existing_status != status {
+                        *queue_status_deltas
+                            .entry((existing_queue_name.to_owned(), existing_status.to_owned()))
+                            .or_insert(0) -= 1;
+                        *queue_status_deltas
+                            .entry((queue_name.to_owned(), status.to_owned()))
+                            .or_insert(0) += 1;
+                    }
+                }
             }
+        } else {
+            *queue_status_deltas
+                .entry((queue_name.to_owned(), status.to_owned()))
+                .or_insert(0) += 1;
         }
 
         batch.insert(primary_key.as_bytes(), raw);
         batch.insert(queue_time_key, &[1_u8]);
         batch.insert(status_key, status.as_bytes());
         batch.insert(status_fifo_key, &[1_u8]);
+        apply_queue_status_count_deltas(&self.db, &mut batch, queue_status_deltas)?;
         self.db.apply_batch(batch).map_err(StorageError::Sled)?;
         self.db.flush().map_err(StorageError::Sled)?;
         Ok(())
@@ -293,6 +396,7 @@ impl StorageBackend for SledStorage {
         let existing_execution_start_ms = parse_rfc3339_timestamp_ms(&parsed, "execution_start_at");
 
         let mut batch = sled::Batch::default();
+        let mut queue_status_deltas = HashMap::<(String, String), i64>::new();
         batch.remove(primary_key.as_bytes());
         batch.remove(job_status_key(job_uuid));
         if let (Some(existing_status), Some(existing_created_at_ms)) =
@@ -313,6 +417,15 @@ impl StorageBackend for SledStorage {
                 job_uuid,
             ));
         }
+        if let (Some(existing_queue_name), Some(existing_status)) = (
+            parsed.get("queue_name").and_then(serde_json::Value::as_str),
+            parsed.get("status").and_then(serde_json::Value::as_str),
+        ) {
+            *queue_status_deltas
+                .entry((existing_queue_name.to_owned(), existing_status.to_owned()))
+                .or_insert(0) -= 1;
+        }
+        apply_queue_status_count_deltas(&self.db, &mut batch, queue_status_deltas)?;
 
         self.db.apply_batch(batch).map_err(StorageError::Sled)?;
         self.db.flush().map_err(StorageError::Sled)?;

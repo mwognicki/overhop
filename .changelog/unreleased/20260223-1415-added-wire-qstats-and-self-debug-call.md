@@ -1,0 +1,4 @@
+- added worker wire message `QSTATS` (`t=18`) with queue payload validation and parser action
+- implemented `QSTATS` runtime handler returning persisted per-status job counters for non-system queues
+- extended self-debug terminal flow with final `QSTATS` request and message-type label mapping
+- updated wire/session/self-debug docs and LLM context for `QSTATS` flow

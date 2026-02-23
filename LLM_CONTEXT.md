@@ -16,6 +16,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep fragment entries concise and release-note oriented.
 8. Use branch-based development flow:
    - Create and work on `feat/*`, `quickfix/*`, or `chore/*` branches.
+   - Treat `develop` as a long-lived integration branch; `develop` is NOT a feature branch.
    - Avoid direct pushes to `main`.
    - Prefer merging through PRs from topic branch to `main`.
    - Prefer generating PR body from `.changelog/unreleased` fragments via `scripts/generate_pr_body_from_changelog.sh` (or optional workflow `.github/workflows/pr-body-from-changelog.yml`).
@@ -76,6 +77,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Registered workers may use JOB (`t=15`, payload `jid`) to fetch persisted job records by id; system-queue jobs remain inaccessible.
    - Registered workers may use RMJOB (`t=16`, payload `jid`) to remove persisted jobs in statuses `delayed|new|failed|completed`; system-queue jobs remain inaccessible.
    - Registered workers may use LSJOB (`t=17`, payload `q`, `status`, optional `page_size`, optional `page`) to list persisted jobs filtered by queue and status, ordered by `created_at` ascending.
+   - Registered workers may use QSTATS (`t=18`, payload `q`) to fetch persisted job counters per status for non-system queues.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Anonymous metadata should track optional IDENT reply deadline timestamp when IDENT challenge is issued.
@@ -104,6 +106,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep default data path rooted at `~/.overhop/data` with `~/` and `$HOME/` expansion support.
    - Keep engine-specific details behind storage backend abstractions so domain logic stays engine-agnostic.
    - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` primary jobs, `v1:j_qt:` queue-time job index, `v1:status:` job status key, `v1:status_fifo:` status FIFO index ordered by `created_at`).
+   - Keep per-queue status counters persisted under versioned keyspace (`v1:q_status:<queue>:<status>`) and update them on insert/status-transition/remove flows.
    - Keep ordered numeric key fragments encoded in big-endian sortable form for sled iterator correctness.
    - Keep storage abstraction and concrete engine implementations separated into dedicated files/modules.
 24. Persistent queue bootstrap flow is implemented in `src/orchestrator/queues/persistent.rs`:

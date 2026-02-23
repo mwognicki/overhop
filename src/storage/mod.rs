@@ -5,7 +5,7 @@ mod facade;
 mod path;
 mod sled_backend;
 
-pub use backend::StorageBackend;
+pub use backend::{QueueStatusCount, StorageBackend};
 pub use engine::{SledMode, StorageEngine};
 pub use error::StorageError;
 pub use facade::StorageFacade;
@@ -338,6 +338,72 @@ mod tests {
             .and_then(serde_json::Value::as_str)
             .expect("created_at should exist");
         assert!(created_first < created_last);
+
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn queue_status_counts_track_transitions_and_removals() {
+        let path = unique_temp_path("queue-status-counts");
+        let storage = test_storage(&path);
+
+        let created_at = chrono::Utc::now();
+        let job_uuid = uuid::Uuid::new_v4();
+        let record_new = serde_json::json!({
+            "uuid": job_uuid.to_string(),
+            "jid": format!("critical:{job_uuid}"),
+            "queue_name": "critical",
+            "status": "new",
+            "execution_start_at": created_at.to_rfc3339(),
+            "created_at": created_at.to_rfc3339(),
+        });
+        storage
+            .upsert_job_record(
+                job_uuid,
+                &record_new,
+                created_at.timestamp_millis(),
+                created_at.timestamp_millis(),
+                "critical",
+                "new",
+            )
+            .expect("new upsert should work");
+
+        let mut stats = storage
+            .list_queue_status_counts()
+            .expect("stats lookup should work");
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].queue_name, "critical");
+        assert_eq!(stats[0].status, "new");
+        assert_eq!(stats[0].count, 1);
+
+        let mut record_waiting = record_new.clone();
+        record_waiting["status"] = serde_json::Value::String("waiting".to_owned());
+        storage
+            .upsert_job_record(
+                job_uuid,
+                &record_waiting,
+                created_at.timestamp_millis(),
+                created_at.timestamp_millis(),
+                "critical",
+                "waiting",
+            )
+            .expect("waiting upsert should work");
+
+        stats = storage
+            .list_queue_status_counts()
+            .expect("stats lookup should work");
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].queue_name, "critical");
+        assert_eq!(stats[0].status, "waiting");
+        assert_eq!(stats[0].count, 1);
+
+        storage
+            .remove_job_record(job_uuid)
+            .expect("remove should work");
+        stats = storage
+            .list_queue_status_counts()
+            .expect("stats lookup should work");
+        assert!(stats.is_empty());
 
         let _ = std::fs::remove_dir_all(path);
     }

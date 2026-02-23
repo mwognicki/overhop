@@ -1,0 +1,5 @@
+- added persisted queue/status job counters keyed by `v1:q_status:<queue>:<status>`
+- implemented atomic counter updates on job insert, status transition, and removal in sled backend flows
+- extended storage facade/backend with `list_queue_status_counts` API for queue-status stats retrieval
+- allowed `active` status in LSJOB status filter validation and protocol docs
+- added storage tests covering counter lifecycle across transition and deletion paths

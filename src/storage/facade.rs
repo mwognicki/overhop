@@ -8,7 +8,10 @@ use crate::config::AppConfig;
 use crate::logging::{LogLevel, Logger};
 use crate::orchestrator::queues::Queue;
 
-use super::{SledMode, SledStorage, StorageBackend, StorageEngine, StorageError, expand_home_path};
+use super::{
+    QueueStatusCount, SledMode, SledStorage, StorageBackend, StorageEngine, StorageError,
+    expand_home_path,
+};
 
 pub struct StorageFacade {
     engine: StorageEngine,
@@ -110,6 +113,10 @@ impl StorageFacade {
 
     pub fn list_job_uuids_by_status_fifo(&self, status: &str) -> Result<Vec<Uuid>, StorageError> {
         self.backend.list_job_uuids_by_status_fifo(status)
+    }
+
+    pub fn list_queue_status_counts(&self) -> Result<Vec<QueueStatusCount>, StorageError> {
+        self.backend.list_queue_status_counts()
     }
 
     pub fn list_job_records_by_queue_and_status(
