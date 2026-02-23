@@ -1,0 +1,3 @@
+- reformatted ROADMAP implemented-scope structure from a single matrix into per-category sections
+- converted each category into a dedicated feature table with `Feature`, `Comments`, and `Status` columns
+- marked implemented roadmap rows with green check status indicators for clearer scanability

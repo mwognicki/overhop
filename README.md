@@ -20,6 +20,7 @@ This repository is both a technical project and a research log.
 - [Objectives](#objectives)
 - [Observation Reports](#observation-reports)
 - [Deliberate Imperfections](#deliberate-imperfections)
+- [Roadmap](#roadmap)
 - [Repository Navigation](#repository-navigation)
 - [Changelog and Commit Discipline](#changelog-and-commit-discipline)
 - [Branch and PR Flow](#branch-and-pr-flow)
@@ -81,11 +82,16 @@ Regular reports from ongoing observations are currently maintained in the reposi
 
 Some imperfections are intentionally left in the repository as a playground for refining interaction strategies with LLM coding assistants.
 
+## Roadmap
+
+- Project roadmap: [`ROADMAP.md`](ROADMAP.md)
+
 ## Repository Navigation
 
 High-level project docs:
 
 - Main architecture/research overview: [`README.md`](README.md)
+- Roadmap snapshot: [`ROADMAP.md`](ROADMAP.md)
 - LLM collaboration rules: [`LLM_CONTEXT.md`](LLM_CONTEXT.md)
 - Wire protocol draft/spec: [`src/wire/PROTOCOL.md`](src/wire/PROTOCOL.md)
 - Release history: [`CHANGELOG.md`](CHANGELOG.md)
