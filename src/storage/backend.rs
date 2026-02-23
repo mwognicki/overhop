@@ -8,6 +8,7 @@ pub trait StorageBackend: Send + Sync {
     fn flush(&self) -> Result<(), StorageError>;
     fn load_queues(&self) -> Result<Vec<Queue>, StorageError>;
     fn replace_queues(&self, queues: &[Queue]) -> Result<(), StorageError>;
+    fn list_job_uuids_by_status(&self, status: &str) -> Result<Vec<Uuid>, StorageError>;
     fn upsert_job_record(
         &self,
         job_uuid: Uuid,

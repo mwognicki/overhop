@@ -91,6 +91,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Optional retry interval must be strictly positive when provided.
    - Jobs pool is transient staging only; enqueue stages in memory, emits persistence event, and successful persistence must evict staged job from pool.
    - Shutdown should best-effort flush remaining staged jobs to persistence before exit, and pause briefly (100 ms) after pool drain.
+   - Heartbeat-driven status progression should promote persisted jobs from `new` to `waiting`/`delayed`, and from `delayed` to `waiting` once execution time is reached.
 23. Storage facade is implemented in `src/storage/mod.rs`:
    - Keep engine selection explicit via `AppConfig.storage.engine` (currently only `sled`).
    - Keep storage initialization fail-fast before TCP server startup.

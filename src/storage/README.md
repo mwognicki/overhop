@@ -35,6 +35,7 @@ Provide a pluggable storage facade so business/domain modules depend on stable s
 - Queue records are scanned by prefix (`v1:q:`) for full queue-state restoration.
 - Job-by-UUID lookup is direct by exact key (`v1:j:<uuid>`).
 - Queue-time index sorts by execution start first, then queue name, then job uuid.
+- Queue-time index is intended for future range/limit/offset style retrieval by earliest execution time.
 - Status key stores mutable status value and is optimized for frequent updates.
 - Key prefixes are immutable and versioned to allow future keyspace migrations without breaking existing data.
 
