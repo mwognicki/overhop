@@ -70,6 +70,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Registered workers may use SUBSCRIBE (`t=6`, payload `q` plus optional non-negative `credits`) and UNSUBSCRIBE (`t=7`, payload `sid`) for queue subscription lifecycle.
    - Registered workers may use CREDIT (`t=8`, payload `sid` + positive `credits`) to increase credits on their own subscriptions only.
    - Registered workers may use RMQUEUE (`t=11`, payload `q`) to remove non-system queues only (`_`-prefixed queues are protected).
+   - Registered workers may use PAUSE (`t=12`, payload `q`) and RESUME (`t=13`, payload `q`) for non-system queue state transitions.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Anonymous metadata should track optional IDENT reply deadline timestamp when IDENT challenge is issued.
