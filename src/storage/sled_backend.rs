@@ -12,6 +12,7 @@ pub struct SledStorage {
 
 const KEYSPACE_VERSION: &str = "v1";
 const QUEUE_PREFIX: &[u8] = b"v1:q:";
+const JOB_STATUS_PREFIX: &[u8] = b"v1:status:";
 
 impl SledStorage {
     pub fn open(
@@ -46,6 +47,17 @@ fn queue_key(queue_name: &str) -> Vec<u8> {
 
 fn job_key(job_uuid: Uuid) -> String {
     format!("{KEYSPACE_VERSION}:j:{job_uuid}")
+}
+
+fn job_queue_time_key(execution_start_ms: i64, queue_name: &str, job_uuid: Uuid) -> Vec<u8> {
+    format!("{KEYSPACE_VERSION}:j_qt:{execution_start_ms}:{queue_name}:{job_uuid}").into_bytes()
+}
+
+fn job_status_key(job_uuid: Uuid) -> Vec<u8> {
+    let mut key = Vec::with_capacity(JOB_STATUS_PREFIX.len() + 36);
+    key.extend_from_slice(JOB_STATUS_PREFIX);
+    key.extend_from_slice(job_uuid.to_string().as_bytes());
+    key
 }
 
 impl StorageBackend for SledStorage {
@@ -86,10 +98,23 @@ impl StorageBackend for SledStorage {
         &self,
         job_uuid: Uuid,
         record: &serde_json::Value,
+        execution_start_ms: i64,
+        queue_name: &str,
+        status: &str,
     ) -> Result<(), StorageError> {
-        let key = job_key(job_uuid);
+        let primary_key = job_key(job_uuid);
+        let queue_time_key = job_queue_time_key(execution_start_ms, queue_name, job_uuid);
+        let status_key = job_status_key(job_uuid);
         let raw = serde_json::to_vec(record).map_err(StorageError::SerializeJob)?;
-        self.db.insert(key.as_bytes(), raw).map_err(StorageError::Sled)?;
+        self.db
+            .insert(primary_key.as_bytes(), raw)
+            .map_err(StorageError::Sled)?;
+        self.db
+            .insert(queue_time_key, &[1_u8])
+            .map_err(StorageError::Sled)?;
+        self.db
+            .insert(status_key, status.as_bytes())
+            .map_err(StorageError::Sled)?;
         self.db.flush().map_err(StorageError::Sled)?;
         Ok(())
     }

@@ -89,13 +89,13 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Default new-job status is `new`, and execution start timestamp must be `scheduled_at` or immediate time.
    - Job runtime metadata must include `attempts_so_far`, initialized as `0` on job creation.
    - Optional retry interval must be strictly positive when provided.
-   - Successful enqueue must trigger immediate persistence through storage backend integration points.
+   - Jobs pool is transient staging only; enqueue stages in memory, emits persistence event, and successful persistence must evict staged job from pool.
 23. Storage facade is implemented in `src/storage/mod.rs`:
    - Keep engine selection explicit via `AppConfig.storage.engine` (currently only `sled`).
    - Keep storage initialization fail-fast before TCP server startup.
    - Keep default data path rooted at `~/.overhop/data` with `~/` and `$HOME/` expansion support.
    - Keep engine-specific details behind storage backend abstractions so domain logic stays engine-agnostic.
-   - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` for jobs).
+   - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` primary jobs, `v1:j_qt:` queue-time job index, `v1:status:` job status key).
    - Keep storage abstraction and concrete engine implementations separated into dedicated files/modules.
 24. Persistent queue bootstrap flow is implemented in `src/orchestrator/queues/persistent.rs`:
    - On first run, persist and preload `_system` queue.

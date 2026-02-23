@@ -2,7 +2,7 @@
 
 ## Core Objective
 
-Provide a base jobs pool abstraction for queue-aware job creation with strict enqueue validation and immediate persistence hooks.
+Provide a transient jobs staging pool abstraction for queue-aware job creation with strict enqueue validation and event-driven persistence handoff.
 
 ## Core Ideas
 
@@ -10,15 +10,14 @@ Provide a base jobs pool abstraction for queue-aware job creation with strict en
 - System queues (`_` prefix) cannot accept enqueued jobs.
 - Job payload is optional but must be JSON-serializable.
 - Each new job is assigned a random UUID and a composed job ID (`<queue-name>:<uuid>`).
-- Every accepted enqueue operation triggers immediate persistence through a storage backend interface.
+- Every accepted enqueue operation stages the job in memory and hands it off through events for persistence.
 
 ## Core Concepts
 
 - `JobsPool`
-  - in-memory jobs registry
+  - temporary in-memory jobs staging registry
   - enqueue validation and lifecycle defaults
-  - immediate call into `JobsStorageBackend`
-  - reserved persistence flow mode toggle for future store-first strategy
+  - explicit removal API used after successful persistence
 - `NewJobOptions`
   - optional payload (`serde_json::Value`)
   - optional `scheduled_at` (past timestamps are allowed)
@@ -34,5 +33,5 @@ Provide a base jobs pool abstraction for queue-aware job creation with strict en
 
 - Queue existence is enforced at enqueue time.
 - System queue enqueue is rejected at enqueue time.
-- Enqueue returns generated job UUID on success.
-- Storage failure causes enqueue rollback to keep in-memory pool consistent with persistence state.
+- Enqueue stages and returns generated job UUID on success.
+- Persist-and-evict behavior is handled by event listeners (outside this module) to keep memory bounded.

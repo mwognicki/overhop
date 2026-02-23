@@ -1,0 +1,5 @@
+- refactored jobs pool into transient in-memory staging buffer (no direct persistence inside `JobsPool`)
+- added event-driven persist-and-evict flow: enqueue stages job, emits `jobs.persist.requested`, sync listener persists to storage and removes staged job on success
+- updated job persistence keying in storage: primary `v1:j:<uuid>`, queue-time index `v1:j_qt:<execution_start_ms>:<queue>:<uuid>`, and mutable status key `v1:status:<uuid>`
+- kept enqueue validation for existing non-system queues while decoupling worker enqueue authorization from subscriptions
+- updated jobs/storage docs and LLM context for the transient pool + event persistence model
