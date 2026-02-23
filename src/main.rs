@@ -397,6 +397,8 @@ fn main() {
     );
 }
 
+// Loads application config via discovery and exits with code 2 on failure.
+// @todo Move to `src/config/mod.rs` as a runtime-safe bootstrap helper.
 fn load_config_or_exit(args: Vec<String>) -> AppConfig {
     match AppConfig::load_with_discovery(args) {
         Ok(config) => config,
@@ -407,6 +409,8 @@ fn load_config_or_exit(args: Vec<String>) -> AppConfig {
     }
 }
 
+// Ensures runtime is POSIX-compatible before startup continues.
+// @todo Move to a dedicated runtime/bootstrap module (for example `src/utils/runtime.rs`).
 fn ensure_posix_or_exit() {
     if !cfg!(unix) {
         eprintln!("unsupported platform: Overhop is intended for POSIX systems");
@@ -414,6 +418,8 @@ fn ensure_posix_or_exit() {
     }
 }
 
+// Prints the hardcoded startup banner and runtime metadata lines.
+// @todo Move to a dedicated startup presentation module (for example `src/utils/startup_banner.rs`).
 fn print_startup_banner() {
     const RESET: &str = "\x1b[0m";
     const BANNER_COLOR: &str = "\x1b[38;5;66m";
@@ -462,6 +468,8 @@ struct AnonymousTimeoutPolicy {
 }
 
 impl AnonymousTimeoutPolicy {
+    // Computes heartbeat maintenance cadence from anonymous lifecycle limits.
+    // @todo Move with `AnonymousTimeoutPolicy` to `src/wire/session/mod.rs`.
     fn maintenance_interval_seconds(self) -> u64 {
         self.unhelloed_max_lifetime_seconds
             .min(self.helloed_unregistered_max_lifetime_seconds)
@@ -469,6 +477,8 @@ impl AnonymousTimeoutPolicy {
     }
 }
 
+// Processes anonymous-connection wire frames and applies HELLO/REGISTER lifecycle actions.
+// @todo Move to `src/wire/session/mod.rs` (or a dedicated `src/wire/session/runtime.rs`).
 fn process_anonymous_client_messages(
     pools: &ConnectionWorkerPools,
     wire_codec: &WireCodec,
@@ -627,6 +637,8 @@ fn process_anonymous_client_messages(
     }
 }
 
+// Writes a pre-encoded wire response frame to a persistent connection.
+// @todo Move to `src/wire/session/mod.rs` as a shared frame-write helper.
 fn write_response_frame(
     connection: &Arc<server::PersistentConnection>,
     response_frame: &[u8],
@@ -658,6 +670,8 @@ fn write_response_frame(
     }
 }
 
+// Builds/sends protocol `ERR` for anonymous flow and terminates that anonymous connection.
+// @todo Move to `src/wire/session/mod.rs` with anonymous protocol error handling.
 fn send_protocol_error_and_close(
     pools: &ConnectionWorkerPools,
     wire_codec: &WireCodec,
@@ -694,6 +708,8 @@ fn send_protocol_error_and_close(
     );
 }
 
+// Purges stale anonymous connections and enforces IDENT/register timeout lifecycle.
+// @todo Move to `src/wire/session/mod.rs` (anonymous maintenance responsibilities).
 fn purge_stale_anonymous_connections(
     pools: &ConnectionWorkerPools,
     wire_codec: &WireCodec,
@@ -793,6 +809,8 @@ fn purge_stale_anonymous_connections(
     }
 }
 
+// Processes registered-worker wire frames and routes supported worker protocol actions.
+// @todo Move to `src/wire/session/mod.rs` (or a dedicated worker session handler module).
 fn process_worker_client_messages(
     pools: &ConnectionWorkerPools,
     emitter: &EventEmitter,
@@ -2097,6 +2115,8 @@ fn process_worker_client_messages(
     }
 }
 
+// Builds/sends protocol `ERR` frame to a worker connection.
+// @todo Move to `src/wire/session/mod.rs` as worker error-response helper.
 fn send_worker_protocol_error(
     wire_codec: &WireCodec,
     logger: &Logger,
@@ -2120,6 +2140,8 @@ fn send_worker_protocol_error(
     }
 }
 
+// Resolves a queue by name for worker flows and returns wire-friendly not-found errors.
+// @todo Move to `src/wire/session/mod.rs` near worker queue command validation.
 fn ensure_queue_exists_for_worker<'a>(
     persistent_queues: &'a PersistentQueuePool,
     queue_name: &str,
@@ -2135,6 +2157,8 @@ fn ensure_queue_exists_for_worker<'a>(
         })
 }
 
+// Resolves queue and rejects system queues for worker mutating operations.
+// @todo Move to `src/wire/session/mod.rs` near queue guard helpers.
 fn ensure_non_system_queue_for_worker<'a>(
     persistent_queues: &'a PersistentQueuePool,
     queue_name: &str,
@@ -2149,6 +2173,8 @@ fn ensure_non_system_queue_for_worker<'a>(
     Ok(queue)
 }
 
+// Maps pool-layer errors to wire protocol error codes/messages for worker responses.
+// @todo Move to `src/wire/session/mod.rs` (worker error mapping layer).
 fn map_pool_error_for_worker_error(error: &PoolError) -> (&'static str, String) {
     match error {
         PoolError::QueueNotFound { queue_name } => {
@@ -2181,6 +2207,8 @@ fn map_pool_error_for_worker_error(error: &PoolError) -> (&'static str, String) 
     }
 }
 
+// Maps jobs-layer errors to wire protocol error codes/messages for worker responses.
+// @todo Move to `src/wire/session/mod.rs` (jobs command error mapping layer).
 fn map_jobs_pool_error_for_worker_error(error: &JobsPoolError) -> (&'static str, String) {
     match error {
         JobsPoolError::QueueNotFound { queue_name } => {
@@ -2213,6 +2241,8 @@ fn map_jobs_pool_error_for_worker_error(error: &JobsPoolError) -> (&'static str,
     }
 }
 
+// Maps persistent-queue-layer errors to wire protocol error codes/messages.
+// @todo Move to `src/wire/session/mod.rs` (queue command error mapping layer).
 fn map_persistent_queue_error_for_worker_error(
     error: &PersistentQueuePoolError,
     queue_name: &str,
@@ -2254,10 +2284,14 @@ fn map_persistent_queue_error_for_worker_error(
     }
 }
 
+// Placeholder policy hook deciding whether queue jobs allow queue removal.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (queue-removal safety policy).
 fn queue_jobs_allow_removal(_queue_name: &str) -> bool {
     true
 }
 
+// Best-effort persists staged transient jobs before process exit.
+// @todo Move to `src/orchestrator/jobs/mod.rs` as shutdown-drain orchestration.
 fn drain_transient_jobs_pool_before_exit(
     storage: &StorageFacade,
     jobs_pool: &Mutex<JobsPool>,
@@ -2341,6 +2375,8 @@ fn drain_transient_jobs_pool_before_exit(
     }
 }
 
+// Builds persisted JSON representation of a staged job.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (job serialization helper).
 fn build_job_record_json(job: &Job) -> serde_json::Value {
     serde_json::json!({
         "uuid": job.uuid.to_string(),
@@ -2358,6 +2394,8 @@ fn build_job_record_json(job: &Job) -> serde_json::Value {
     })
 }
 
+// Builds event payload for `jobs.persist.requested`.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (event payload builder).
 fn build_job_persist_event_payload(job: &Job) -> serde_json::Value {
     serde_json::json!({
         "job_uuid": job.uuid.to_string(),
@@ -2369,6 +2407,8 @@ fn build_job_persist_event_payload(job: &Job) -> serde_json::Value {
     })
 }
 
+// Advances persisted job statuses based on schedule time and paused queue state.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (heartbeat progression logic).
 fn advance_persisted_jobs_statuses(storage: &StorageFacade, logger: &Logger) -> Result<(), String> {
     let now = Utc::now();
     let mut transitioned = 0usize;
@@ -2435,6 +2475,8 @@ fn advance_persisted_jobs_statuses(storage: &StorageFacade, logger: &Logger) -> 
     Ok(())
 }
 
+// Loads paused queue names from persistence for status progression filtering.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (status progression support).
 fn load_paused_queue_names(storage: &StorageFacade) -> Result<HashSet<String>, String> {
     let queues = storage.load_queues().map_err(|error| error.to_string())?;
     Ok(queues
@@ -2444,6 +2486,8 @@ fn load_paused_queue_names(storage: &StorageFacade) -> Result<HashSet<String>, S
         .collect())
 }
 
+// Applies a single persisted job status transition and writes it back to storage.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (status transition primitive).
 fn apply_persisted_job_status_transition(
     storage: &StorageFacade,
     job_uuid: uuid::Uuid,
@@ -2484,6 +2528,8 @@ fn apply_persisted_job_status_transition(
     Ok(true)
 }
 
+// Extracts and parses `execution_start_at` RFC3339 timestamp from persisted job JSON.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (persisted job parsing helper).
 fn extract_execution_start_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
     let raw = record.get("execution_start_at")?.as_str()?;
     DateTime::parse_from_rfc3339(raw)
@@ -2491,6 +2537,8 @@ fn extract_execution_start_at(record: &serde_json::Value) -> Option<DateTime<Utc
         .map(|value| value.with_timezone(&Utc))
 }
 
+// Extracts and parses `created_at` RFC3339 timestamp from persisted job JSON.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (persisted job parsing helper).
 fn extract_created_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
     let raw = record.get("created_at")?.as_str()?;
     DateTime::parse_from_rfc3339(raw)
@@ -2498,6 +2546,8 @@ fn extract_created_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
         .map(|value| value.with_timezone(&Utc))
 }
 
+// Extracts queue name from persisted job JSON record.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (persisted job parsing helper).
 fn extract_queue_name(record: &serde_json::Value) -> Option<String> {
     record
         .get("queue_name")
@@ -2505,6 +2555,8 @@ fn extract_queue_name(record: &serde_json::Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+// Converts a JSON object into wire payload map format.
+// @todo Move to `src/wire/codec/mod.rs` (JSON-to-wire conversion utilities).
 fn json_object_to_payload_map(value: &serde_json::Value) -> Result<PayloadMap, &'static str> {
     let serde_json::Value::Object(entries) = value else {
         return Err("persisted job record is not a map object");
@@ -2516,6 +2568,8 @@ fn json_object_to_payload_map(value: &serde_json::Value) -> Result<PayloadMap, &
     Ok(payload)
 }
 
+// Recursively converts JSON values into MessagePack-compatible `rmpv::Value`.
+// @todo Move to `src/wire/codec/mod.rs` (JSON-to-wire conversion utilities).
 fn json_value_to_rmpv(value: &serde_json::Value) -> Result<rmpv::Value, &'static str> {
     match value {
         serde_json::Value::Null => Ok(rmpv::Value::Nil),
@@ -2551,6 +2605,8 @@ fn json_value_to_rmpv(value: &serde_json::Value) -> Result<rmpv::Value, &'static
     }
 }
 
+// Converts internal `JobStatus` enum into persisted/wire status string.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (status conversion helper).
 fn job_status_to_str(status: JobStatus) -> &'static str {
     match status {
         JobStatus::New => "new",
@@ -2559,10 +2615,14 @@ fn job_status_to_str(status: JobStatus) -> &'static str {
     }
 }
 
+// Returns whether a job status allows removal through `RMJOB`.
+// @todo Move to `src/orchestrator/jobs/mod.rs` (job-removal policy).
 fn can_remove_job_by_status(status: &str) -> bool {
     matches!(status, "delayed" | "new" | "failed" | "completed")
 }
 
+// Validates allowed status filter values for `LSJOB`.
+// @todo Move to `src/wire/session/mod.rs` (LSJOB payload validation helpers).
 fn is_lsjob_status_allowed(status: &str) -> bool {
     matches!(
         status,
@@ -2570,14 +2630,20 @@ fn is_lsjob_status_allowed(status: &str) -> bool {
     )
 }
 
+// Returns status set exposed by `QSTATS`.
+// @todo Move to `src/wire/session/mod.rs` (QSTATS response policy helpers).
 fn qstats_statuses() -> &'static [&'static str] {
     &["new", "waiting", "delayed", "completed", "failed", "active"]
 }
 
+// Validates status keys allowed in `QSTATS` payload assembly.
+// @todo Move to `src/wire/session/mod.rs` (QSTATS response policy helpers).
 fn is_qstats_status_allowed(status: &str) -> bool {
     qstats_statuses().contains(&status)
 }
 
+// Converts queue domain struct into worker-facing queue metadata payload map.
+// @todo Move to `src/wire/session/mod.rs` (queue wire serialization helpers).
 fn queue_metadata_payload(queue: &Queue) -> PayloadMap {
     let mut payload = PayloadMap::new();
     let queue_value = queue_to_wire_value(queue.clone());
@@ -2594,6 +2660,8 @@ fn queue_metadata_payload(queue: &Queue) -> PayloadMap {
     payload
 }
 
+// Serializes queue domain struct into `rmpv::Value` map for wire transport.
+// @todo Move to `src/wire/session/mod.rs` (queue wire serialization helpers).
 fn queue_to_wire_value(queue: Queue) -> rmpv::Value {
     let mut config_entries = Vec::new();
     let concurrency = match queue.config.concurrency_limit {
