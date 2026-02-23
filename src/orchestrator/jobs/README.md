@@ -35,3 +35,4 @@ Provide a transient jobs staging pool abstraction for queue-aware job creation w
 - System queue enqueue is rejected at enqueue time.
 - Enqueue stages and returns generated job UUID on success.
 - Persist-and-evict behavior is handled by event listeners (outside this module) to keep memory bounded.
+- Shutdown flow performs best-effort transient pool draining and delays exit briefly after full drain.

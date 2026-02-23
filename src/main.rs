@@ -332,6 +332,8 @@ fn main() {
         process::exit(2);
     }
     server.shutdown_all_connections();
+    drain_transient_jobs_pool_before_exit(storage.as_ref(), jobs_pool.as_ref(), logger.as_ref());
+    thread::sleep(Duration::from_millis(100));
 
     let drained = emitter.wait_for_idle(Duration::from_secs(3));
     if drained {
@@ -1716,6 +1718,88 @@ fn map_persistent_queue_error_for_worker_error(
 
 fn queue_jobs_allow_removal(_queue_name: &str) -> bool {
     true
+}
+
+fn drain_transient_jobs_pool_before_exit(
+    storage: &StorageFacade,
+    jobs_pool: &Mutex<JobsPool>,
+    logger: &Logger,
+) {
+    let max_wait = Duration::from_secs(10);
+    let started_at = std::time::Instant::now();
+
+    loop {
+        let pending = match jobs_pool.lock() {
+            Ok(guard) => guard.snapshot().jobs,
+            Err(_) => {
+                logger.warn(
+                    Some("main::shutdown"),
+                    "jobs pool lock poisoned during shutdown flush; skipping transient drain",
+                );
+                return;
+            }
+        };
+
+        if pending.is_empty() {
+            logger.info(
+                Some("main::shutdown"),
+                "Transient jobs pool drained before exit",
+            );
+            return;
+        }
+
+        let mut persisted_count = 0usize;
+        for job in pending {
+            let record = build_job_record_json(&job);
+            let persisted = storage
+                .upsert_job_record(
+                    job.uuid,
+                    &record,
+                    job.execution_start_at.timestamp_millis(),
+                    &job.queue_name,
+                    job_status_to_str(job.status),
+                )
+                .is_ok();
+            if persisted {
+                if let Ok(mut guard) = jobs_pool.lock() {
+                    let _ = guard.remove_job(job.uuid);
+                }
+                persisted_count += 1;
+            }
+        }
+
+        let remaining = match jobs_pool.lock() {
+            Ok(guard) => guard.count(),
+            Err(_) => 0,
+        };
+        logger.debug(
+            Some("main::shutdown"),
+            &format!(
+                "Transient jobs flush iteration persisted {persisted_count} jobs, remaining {remaining}"
+            ),
+        );
+
+        if remaining == 0 {
+            logger.info(
+                Some("main::shutdown"),
+                "Transient jobs pool drained before exit",
+            );
+            return;
+        }
+
+        if started_at.elapsed() >= max_wait {
+            logger.warn(
+                Some("main::shutdown"),
+                &format!(
+                    "Transient jobs pool still has {remaining} jobs after {:?}; best-effort drain exhausted",
+                    max_wait
+                ),
+            );
+            return;
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn build_job_record_json(job: &Job) -> serde_json::Value {

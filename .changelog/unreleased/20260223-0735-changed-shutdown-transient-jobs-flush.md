@@ -1,0 +1,3 @@
+- added best-effort shutdown drain for transient jobs pool, retrying persistence of staged jobs before exit
+- shutdown now delays final process exit by 100 ms after transient jobs pool is fully drained
+- added shutdown drain behavior notes to jobs module docs and LLM context
