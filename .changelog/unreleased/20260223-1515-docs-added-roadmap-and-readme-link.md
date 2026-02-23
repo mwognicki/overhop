@@ -1,0 +1,3 @@
+- added `ROADMAP.md` with explicit mutable-experiment disclaimer and categorized table of currently implemented features
+- sourced roadmap implemented-scope categories from module-level README documentation
+- linked roadmap from main README table of contents and repository navigation sections
