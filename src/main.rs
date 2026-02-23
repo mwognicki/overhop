@@ -883,15 +883,17 @@ fn process_worker_client_messages(
                         request_id,
                         queue_name,
                     }) => {
-                        if persistent_queues.queue_pool().get_queue(&queue_name).is_none() {
+                        if let Err((code, message)) =
+                            ensure_queue_exists_for_worker(persistent_queues, &queue_name)
+                        {
                             let _ = send_worker_protocol_error(
                                 wire_codec,
                                 logger,
                                 &connection,
                                 worker_id,
                                 &request_id,
-                                "QUEUE_NOT_FOUND",
-                                &format!("queue '{queue_name}' not found"),
+                                code,
+                                &message,
                             );
                             continue;
                         }
@@ -950,20 +952,170 @@ fn process_worker_client_messages(
                             }
                         }
                     }
-                    Ok(WorkerProtocolAction::SubscribeRequested {
+                    Ok(WorkerProtocolAction::PauseQueueRequested {
                         request_id,
                         queue_name,
-                        credits,
                     }) => {
-                        if persistent_queues.queue_pool().get_queue(&queue_name).is_none() {
+                        let queue = match ensure_non_system_queue_for_worker(
+                            persistent_queues,
+                            &queue_name,
+                        ) {
+                            Ok(queue) => queue,
+                            Err((code, message)) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    code,
+                                    &message,
+                                );
+                                continue;
+                            }
+                        };
+
+                        if queue.is_paused() {
                             let _ = send_worker_protocol_error(
                                 wire_codec,
                                 logger,
                                 &connection,
                                 worker_id,
                                 &request_id,
-                                "QUEUE_NOT_FOUND",
-                                &format!("queue '{queue_name}' not found"),
+                                "QUEUE_ALREADY_PAUSED",
+                                &format!("queue '{queue_name}' is already paused"),
+                            );
+                            continue;
+                        }
+
+                        match persistent_queues.pause_queue(storage, &queue_name) {
+                            Ok(()) => match wire_codec
+                                .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                            {
+                                Ok(frame) => {
+                                    write_response_frame(
+                                        &connection,
+                                        &frame,
+                                        connection.id(),
+                                        logger,
+                                        "PAUSE OK response",
+                                    );
+                                    let _ = pools.workers.touch_now(worker_id);
+                                }
+                                Err(error) => {
+                                    logger.warn(
+                                        Some("main::wire"),
+                                        &format!(
+                                            "failed to build PAUSE response for worker {worker_id}: {error}"
+                                        ),
+                                    );
+                                }
+                            },
+                            Err(error) => {
+                                let (code, message) =
+                                    map_persistent_queue_error_for_worker_error(&error, &queue_name);
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    code,
+                                    &message,
+                                );
+                            }
+                        }
+                    }
+                    Ok(WorkerProtocolAction::ResumeQueueRequested {
+                        request_id,
+                        queue_name,
+                    }) => {
+                        let queue = match ensure_non_system_queue_for_worker(
+                            persistent_queues,
+                            &queue_name,
+                        ) {
+                            Ok(queue) => queue,
+                            Err((code, message)) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    code,
+                                    &message,
+                                );
+                                continue;
+                            }
+                        };
+
+                        if !queue.is_paused() {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "QUEUE_ALREADY_RUNNING",
+                                &format!("queue '{queue_name}' is not paused"),
+                            );
+                            continue;
+                        }
+
+                        match persistent_queues.resume_queue(storage, &queue_name) {
+                            Ok(()) => match wire_codec
+                                .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                            {
+                                Ok(frame) => {
+                                    write_response_frame(
+                                        &connection,
+                                        &frame,
+                                        connection.id(),
+                                        logger,
+                                        "RESUME OK response",
+                                    );
+                                    let _ = pools.workers.touch_now(worker_id);
+                                }
+                                Err(error) => {
+                                    logger.warn(
+                                        Some("main::wire"),
+                                        &format!(
+                                            "failed to build RESUME response for worker {worker_id}: {error}"
+                                        ),
+                                    );
+                                }
+                            },
+                            Err(error) => {
+                                let (code, message) =
+                                    map_persistent_queue_error_for_worker_error(&error, &queue_name);
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    code,
+                                    &message,
+                                );
+                            }
+                        }
+                    }
+                    Ok(WorkerProtocolAction::SubscribeRequested {
+                        request_id,
+                        queue_name,
+                        credits,
+                    }) => {
+                        if let Err((code, message)) =
+                            ensure_queue_exists_for_worker(persistent_queues, &queue_name)
+                        {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                code,
+                                &message,
                             );
                             continue;
                         }
@@ -1248,6 +1400,35 @@ fn send_worker_protocol_error(
             false
         }
     }
+}
+
+fn ensure_queue_exists_for_worker<'a>(
+    persistent_queues: &'a PersistentQueuePool,
+    queue_name: &str,
+) -> Result<&'a Queue, (&'static str, String)> {
+    persistent_queues
+        .queue_pool()
+        .get_queue(queue_name)
+        .ok_or_else(|| {
+            (
+                "QUEUE_NOT_FOUND",
+                format!("queue '{queue_name}' not found"),
+            )
+        })
+}
+
+fn ensure_non_system_queue_for_worker<'a>(
+    persistent_queues: &'a PersistentQueuePool,
+    queue_name: &str,
+) -> Result<&'a Queue, (&'static str, String)> {
+    let queue = ensure_queue_exists_for_worker(persistent_queues, queue_name)?;
+    if queue_name.starts_with('_') {
+        return Err((
+            "SYSTEM_QUEUE_FORBIDDEN",
+            format!("queue '{queue_name}' is a system queue and cannot be modified"),
+        ));
+    }
+    Ok(queue)
 }
 
 fn map_pool_error_for_worker_error(error: &PoolError) -> (&'static str, String) {

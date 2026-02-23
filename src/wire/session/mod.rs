@@ -17,6 +17,8 @@ pub const CREDIT_MESSAGE_TYPE: i64 = 8;
 pub const ADDQUEUE_MESSAGE_TYPE: i64 = 9;
 pub const STATUS_MESSAGE_TYPE: i64 = 10;
 pub const RMQUEUE_MESSAGE_TYPE: i64 = 11;
+pub const PAUSE_MESSAGE_TYPE: i64 = 12;
+pub const RESUME_MESSAGE_TYPE: i64 = 13;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -40,6 +42,14 @@ pub enum WorkerProtocolAction {
         config: Option<QueueConfig>,
     },
     RemoveQueueRequested {
+        request_id: String,
+        queue_name: String,
+    },
+    PauseQueueRequested {
+        request_id: String,
+        queue_name: String,
+    },
+    ResumeQueueRequested {
         request_id: String,
         queue_name: String,
     },
@@ -286,6 +296,42 @@ pub fn evaluate_worker_client_frame(
             });
         }
 
+        if envelope.message_type == PAUSE_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("q")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "PAUSE payload must contain string key 'q'".to_owned(),
+                })?;
+
+            return Ok(WorkerProtocolAction::PauseQueueRequested {
+                request_id: envelope.request_id,
+                queue_name,
+            });
+        }
+
+        if envelope.message_type == RESUME_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("q")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "RESUME payload must contain string key 'q'".to_owned(),
+                })?;
+
+            return Ok(WorkerProtocolAction::ResumeQueueRequested {
+                request_id: envelope.request_id,
+                queue_name,
+            });
+        }
+
         if envelope.message_type == SUBSCRIBE_MESSAGE_TYPE {
             let queue_name = envelope
                 .payload
@@ -410,7 +456,7 @@ pub fn evaluate_worker_client_frame(
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
             message:
-                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, or STATUS"
+                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, PAUSE, RESUME, or STATUS"
                     .to_owned(),
         });
     }
@@ -509,9 +555,9 @@ mod tests {
 
     use super::{
         ADDQUEUE_MESSAGE_TYPE, AnonymousProtocolAction, CREDIT_MESSAGE_TYPE, IDENT_MESSAGE_TYPE,
-        LSQUEUE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE,
-        SUBSCRIBE_MESSAGE_TYPE, PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE,
-        STATUS_MESSAGE_TYPE, WorkerProtocolAction,
+        LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE,
+        RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE, PING_MESSAGE_TYPE,
+        PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE, WorkerProtocolAction,
         UNSUBSCRIBE_MESSAGE_TYPE,
         build_ident_frame, build_pong_frame, build_protocol_error_frame,
         evaluate_anonymous_client_frame, evaluate_worker_client_frame,
@@ -879,6 +925,48 @@ mod tests {
         let err = evaluate_worker_client_frame(&codec, &missing_q_frame)
             .expect_err("rmqueue without q should fail");
         assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
+    }
+
+    #[test]
+    fn worker_pause_and_resume_require_q_string_and_accept_valid_payload() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+
+        let mut pause_payload = PayloadMap::new();
+        pause_payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        let pause =
+            crate::wire::envelope::WireEnvelope::new(PAUSE_MESSAGE_TYPE, "rid-pause", pause_payload);
+        let pause_frame = codec
+            .encode_frame(&pause.into_raw())
+            .expect("pause should encode");
+        let pause_action =
+            evaluate_worker_client_frame(&codec, &pause_frame).expect("pause should pass");
+        assert_eq!(
+            pause_action,
+            WorkerProtocolAction::PauseQueueRequested {
+                request_id: "rid-pause".to_owned(),
+                queue_name: "critical".to_owned(),
+            }
+        );
+
+        let mut resume_payload = PayloadMap::new();
+        resume_payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        let resume = crate::wire::envelope::WireEnvelope::new(
+            RESUME_MESSAGE_TYPE,
+            "rid-resume",
+            resume_payload,
+        );
+        let resume_frame = codec
+            .encode_frame(&resume.into_raw())
+            .expect("resume should encode");
+        let resume_action =
+            evaluate_worker_client_frame(&codec, &resume_frame).expect("resume should pass");
+        assert_eq!(
+            resume_action,
+            WorkerProtocolAction::ResumeQueueRequested {
+                request_id: "rid-resume".to_owned(),
+                queue_name: "critical".to_owned(),
+            }
+        );
     }
 
     #[test]

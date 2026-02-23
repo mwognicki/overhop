@@ -1,0 +1,3 @@
+- extended self-debug flow to run `PAUSE` then `RESUME` against the last created persisted queue
+- kept the final queue persisted after state transitions to improve cross-session persistence checks
+- updated self-debug module README to document pause/resume validation on the persisted queue

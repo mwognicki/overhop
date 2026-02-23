@@ -1,0 +1,5 @@
+- added worker wire messages `PAUSE` (`t=12`) and `RESUME` (`t=13`) with queue-name payload (`p.q`)
+- enforced queue-state validation (`PAUSE` only for running queues, `RESUME` only for paused queues)
+- restricted `PAUSE`/`RESUME` to non-system queues (`_`-prefixed queues are rejected)
+- refactored worker queue existence checks in runtime handlers into reusable helpers
+- updated wire protocol draft and module docs for new queue-state messages

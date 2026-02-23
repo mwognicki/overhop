@@ -220,6 +220,42 @@ Constraints:
 - queues with names starting with `_` are system queues and cannot be removed
 - queue-job status validation step exists as a TODO stub for now and currently allows removal
 
+### PAUSE (worker client -> server)
+
+- Message type: `t=12`
+- Allowed only for registered workers.
+- Payload:
+  - `q` (`string`, required): queue name to pause
+
+Response:
+
+- success: empty `OK` payload
+- failure: `ERR` (`t=102`) with standard error payload
+
+Constraints:
+
+- queue must exist
+- queue must not be already paused
+- queues with names starting with `_` are system queues and cannot be paused
+
+### RESUME (worker client -> server)
+
+- Message type: `t=13`
+- Allowed only for registered workers.
+- Payload:
+  - `q` (`string`, required): queue name to resume
+
+Response:
+
+- success: empty `OK` payload
+- failure: `ERR` (`t=102`) with standard error payload
+
+Constraints:
+
+- queue must exist
+- queue must already be paused
+- queues with names starting with `_` are system queues and cannot be resumed
+
 ## Implemented Worker Subscription Flow
 
 ### SUBSCRIBE (worker client -> server)
