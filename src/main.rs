@@ -12,6 +12,7 @@ mod shutdown;
 mod utils;
 mod wire;
 
+use std::collections::HashSet;
 use std::process;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1841,6 +1842,7 @@ fn build_job_persist_event_payload(job: &Job) -> serde_json::Value {
 fn advance_persisted_jobs_statuses(storage: &StorageFacade, logger: &Logger) -> Result<(), String> {
     let now = Utc::now();
     let mut transitioned = 0usize;
+    let paused_queues = load_paused_queue_names(storage)?;
 
     let new_jobs = storage
         .list_job_uuids_by_status("new")
@@ -1852,6 +1854,12 @@ fn advance_persisted_jobs_statuses(storage: &StorageFacade, logger: &Logger) -> 
         else {
             continue;
         };
+        let Some(queue_name) = extract_queue_name(&record) else {
+            continue;
+        };
+        if paused_queues.contains(&queue_name) {
+            continue;
+        }
         let target_status = match extract_execution_start_at(&record) {
             Some(execution_start_at) if execution_start_at > now => JobStatus::Delayed,
             Some(_) => JobStatus::Waiting,
@@ -1872,6 +1880,12 @@ fn advance_persisted_jobs_statuses(storage: &StorageFacade, logger: &Logger) -> 
         else {
             continue;
         };
+        let Some(queue_name) = extract_queue_name(&record) else {
+            continue;
+        };
+        if paused_queues.contains(&queue_name) {
+            continue;
+        }
         let Some(execution_start_at) = extract_execution_start_at(&record) else {
             continue;
         };
@@ -1889,6 +1903,15 @@ fn advance_persisted_jobs_statuses(storage: &StorageFacade, logger: &Logger) -> 
         );
     }
     Ok(())
+}
+
+fn load_paused_queue_names(storage: &StorageFacade) -> Result<HashSet<String>, String> {
+    let queues = storage.load_queues().map_err(|error| error.to_string())?;
+    Ok(queues
+        .into_iter()
+        .filter(|queue| queue.is_paused())
+        .map(|queue| queue.name)
+        .collect())
 }
 
 fn apply_persisted_job_status_transition(
@@ -1933,6 +1956,13 @@ fn extract_execution_start_at(record: &serde_json::Value) -> Option<DateTime<Utc
     DateTime::parse_from_rfc3339(raw)
         .ok()
         .map(|value| value.with_timezone(&Utc))
+}
+
+fn extract_queue_name(record: &serde_json::Value) -> Option<String> {
+    record
+        .get("queue_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
 }
 
 fn job_status_to_str(status: JobStatus) -> &'static str {

@@ -1,0 +1,3 @@
+- updated heartbeat-driven job status progression to skip jobs whose target queues are paused
+- prevented `new`/`delayed` jobs from being promoted while queue processing is paused
+- documented paused-queue skip behavior in jobs module docs and LLM context

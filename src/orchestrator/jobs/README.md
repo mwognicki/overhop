@@ -31,6 +31,7 @@ Provide a transient jobs staging pool abstraction for queue-aware job creation w
   - status progression handled by heartbeat-driven runtime updater:
     - `new` -> `waiting` or `delayed`
     - `delayed` -> `waiting` once execution time is reached
+  - paused queues are skipped by status progression updates (`new`/`delayed` are not promoted while queue is paused)
 
 ## Most Relevant Features
 
