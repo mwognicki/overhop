@@ -21,7 +21,8 @@ Provide foundational queue registry abstractions for queue orchestration with un
     - `allow_job_overrides` (default `true`)
   - `state` (`active` / `paused`)
 - `QueuePool`
-  - queue registration, lookup, listing
+- queue registration, lookup, listing
+- queue removal with system-queue protection (`_` prefix)
   - pause/resume controls
   - JSON snapshot serialization/deserialization
   - reconstruction from stored queues
@@ -34,6 +35,7 @@ Provide foundational queue registry abstractions for queue orchestration with un
 ## Most Relevant Features
 
 - Unique queue registration guard.
+- System queues (name starts with `_`) cannot be removed.
 - Queue creation returns persistent queue UUID for wire/API callers.
 - Serializable queue and pool snapshot structures for storage compatibility.
 - Pause/resume state persistence through JSON snapshots.

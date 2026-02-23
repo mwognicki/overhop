@@ -879,6 +879,77 @@ fn process_worker_client_messages(
                             );
                         }
                     },
+                    Ok(WorkerProtocolAction::RemoveQueueRequested {
+                        request_id,
+                        queue_name,
+                    }) => {
+                        if persistent_queues.queue_pool().get_queue(&queue_name).is_none() {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "QUEUE_NOT_FOUND",
+                                &format!("queue '{queue_name}' not found"),
+                            );
+                            continue;
+                        }
+
+                        // TODO: validate queue jobs statuses before allowing removal.
+                        if !queue_jobs_allow_removal(&queue_name) {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                "QUEUE_NOT_EMPTY",
+                                &format!("queue '{queue_name}' cannot be removed yet"),
+                            );
+                            continue;
+                        }
+
+                        match persistent_queues.remove_queue(storage, &queue_name) {
+                            Ok(()) => {
+                                match wire_codec
+                                    .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                                {
+                                    Ok(frame) => {
+                                        write_response_frame(
+                                            &connection,
+                                            &frame,
+                                            connection.id(),
+                                            logger,
+                                            "RMQUEUE OK response",
+                                        );
+                                        let _ = pools.workers.touch_now(worker_id);
+                                    }
+                                    Err(error) => {
+                                        logger.warn(
+                                            Some("main::wire"),
+                                            &format!(
+                                                "failed to build RMQUEUE response for worker {worker_id}: {error}"
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                let (code, message) =
+                                    map_persistent_queue_error_for_worker_error(&error, &queue_name);
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    code,
+                                    &message,
+                                );
+                            }
+                        }
+                    }
                     Ok(WorkerProtocolAction::SubscribeRequested {
                         request_id,
                         queue_name,
@@ -1228,6 +1299,12 @@ fn map_persistent_queue_error_for_worker_error(
             "QUEUE_NOT_FOUND",
             format!("queue '{queue_name}' not found"),
         ),
+        PersistentQueuePoolError::QueuePool(
+            orchestrator::queues::QueuePoolError::SystemQueueRemovalForbidden { .. },
+        ) => (
+            "SYSTEM_QUEUE_FORBIDDEN",
+            format!("queue '{queue_name}' is a system queue and cannot be removed"),
+        ),
         PersistentQueuePoolError::QueuePool(inner) => {
             ("QUEUE_POOL_ERROR", format!("queue pool operation failed: {inner}"))
         }
@@ -1236,6 +1313,10 @@ fn map_persistent_queue_error_for_worker_error(
             format!("queue persistence operation failed: {inner}"),
         ),
     }
+}
+
+fn queue_jobs_allow_removal(_queue_name: &str) -> bool {
+    true
 }
 
 fn queue_metadata_payload(queue: &Queue) -> PayloadMap {

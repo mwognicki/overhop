@@ -71,6 +71,14 @@ impl PersistentQueuePool {
         self.mutate_and_reload(storage, |pool| pool.resume_queue(name))
     }
 
+    pub fn remove_queue(
+        &mut self,
+        storage: &StorageFacade,
+        name: &str,
+    ) -> Result<(), PersistentQueuePoolError> {
+        self.mutate_and_reload(storage, |pool| pool.remove_queue(name))
+    }
+
     pub fn persist_current_state(&self, storage: &StorageFacade) -> Result<(), PersistentQueuePoolError> {
         storage
             .replace_queues(&self.pool.snapshot().queues)

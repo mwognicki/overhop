@@ -1,0 +1,5 @@
+- added worker wire message `RMQUEUE` (`t=11`) for queue removal by name (`p.q`) with registered-worker-only handling
+- enforced system queue protection by rejecting removal for `_`-prefixed queues
+- added queue removal operation to persistent queue pool with persist-first/reload behavior
+- added temporary queue-job validation stub in runtime removal path (TODO for status-aware checks)
+- updated wire/orchestrator module docs and protocol draft for `RMQUEUE`

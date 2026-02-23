@@ -16,6 +16,7 @@ pub const UNSUBSCRIBE_MESSAGE_TYPE: i64 = 7;
 pub const CREDIT_MESSAGE_TYPE: i64 = 8;
 pub const ADDQUEUE_MESSAGE_TYPE: i64 = 9;
 pub const STATUS_MESSAGE_TYPE: i64 = 10;
+pub const RMQUEUE_MESSAGE_TYPE: i64 = 11;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -37,6 +38,10 @@ pub enum WorkerProtocolAction {
         request_id: String,
         queue_name: String,
         config: Option<QueueConfig>,
+    },
+    RemoveQueueRequested {
+        request_id: String,
+        queue_name: String,
     },
     SubscribeRequested {
         request_id: String,
@@ -263,6 +268,24 @@ pub fn evaluate_worker_client_frame(
             });
         }
 
+        if envelope.message_type == RMQUEUE_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("q")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "RMQUEUE payload must contain string key 'q'".to_owned(),
+                })?;
+
+            return Ok(WorkerProtocolAction::RemoveQueueRequested {
+                request_id: envelope.request_id,
+                queue_name,
+            });
+        }
+
         if envelope.message_type == SUBSCRIBE_MESSAGE_TYPE {
             let queue_name = envelope
                 .payload
@@ -387,7 +410,7 @@ pub fn evaluate_worker_client_frame(
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
             message:
-                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, or STATUS"
+                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, or STATUS"
                     .to_owned(),
         });
     }
@@ -486,9 +509,9 @@ mod tests {
 
     use super::{
         ADDQUEUE_MESSAGE_TYPE, AnonymousProtocolAction, CREDIT_MESSAGE_TYPE, IDENT_MESSAGE_TYPE,
-        LSQUEUE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE,
-        PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE,
-        WorkerProtocolAction,
+        LSQUEUE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE,
+        SUBSCRIBE_MESSAGE_TYPE, PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE,
+        STATUS_MESSAGE_TYPE, WorkerProtocolAction,
         UNSUBSCRIBE_MESSAGE_TYPE,
         build_ident_frame, build_pong_frame, build_protocol_error_frame,
         evaluate_anonymous_client_frame, evaluate_worker_client_frame,
@@ -821,6 +844,40 @@ mod tests {
 
         let err = evaluate_worker_client_frame(&codec, &frame)
             .expect_err("negative credits should fail");
+        assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
+    }
+
+    #[test]
+    fn worker_rmqueue_requires_q_string_and_accepts_valid_payload() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut payload = PayloadMap::new();
+        payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        let rmqueue =
+            crate::wire::envelope::WireEnvelope::new(RMQUEUE_MESSAGE_TYPE, "rid-rm", payload);
+        let frame = codec
+            .encode_frame(&rmqueue.into_raw())
+            .expect("rmqueue should encode");
+
+        let action =
+            evaluate_worker_client_frame(&codec, &frame).expect("rmqueue should be accepted");
+        assert_eq!(
+            action,
+            WorkerProtocolAction::RemoveQueueRequested {
+                request_id: "rid-rm".to_owned(),
+                queue_name: "critical".to_owned(),
+            }
+        );
+
+        let missing_q = crate::wire::envelope::WireEnvelope::new(
+            RMQUEUE_MESSAGE_TYPE,
+            "rid-rm-bad",
+            PayloadMap::new(),
+        );
+        let missing_q_frame = codec
+            .encode_frame(&missing_q.into_raw())
+            .expect("rmqueue should encode");
+        let err = evaluate_worker_client_frame(&codec, &missing_q_frame)
+            .expect_err("rmqueue without q should fail");
         assert!(matches!(err, super::SessionError::ProtocolViolation { .. }));
     }
 
