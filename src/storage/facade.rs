@@ -108,16 +108,21 @@ impl StorageFacade {
         self.backend.list_job_uuids_by_status(status)
     }
 
+    pub fn list_job_uuids_by_status_fifo(&self, status: &str) -> Result<Vec<Uuid>, StorageError> {
+        self.backend.list_job_uuids_by_status_fifo(status)
+    }
+
     pub fn upsert_job_record(
         &self,
         job_uuid: Uuid,
         record: &serde_json::Value,
         execution_start_ms: i64,
+        created_at_ms: i64,
         queue_name: &str,
         status: &str,
     ) -> Result<(), StorageError> {
         self.backend
-            .upsert_job_record(job_uuid, record, execution_start_ms, queue_name, status)
+            .upsert_job_record(job_uuid, record, execution_start_ms, created_at_ms, queue_name, status)
     }
 
     pub fn get_job_payload_by_uuid(

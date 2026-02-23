@@ -1,0 +1,4 @@
+- enriched jobs with immutable `created_at` persistence metadata wiring in transient->storage flow
+- extended storage upsert contract with `created_at_ms` and added sled status FIFO index key ordered by `created_at` (big-endian sortable bytes)
+- added storage API/test coverage for status-scoped FIFO UUID listing (`list_job_uuids_by_status_fifo`)
+- updated storage/jobs/LLM context docs to reflect created-at and FIFO keying rules

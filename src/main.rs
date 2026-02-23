@@ -187,6 +187,12 @@ fn main() {
         else {
             return Err("job persist event missing i64 'execution_start_ms'".to_owned());
         };
+        let Some(created_at_ms) = payload
+            .get("created_at_ms")
+            .and_then(serde_json::Value::as_i64)
+        else {
+            return Err("job persist event missing i64 'created_at_ms'".to_owned());
+        };
         let Some(queue_name) = payload.get("queue_name").and_then(serde_json::Value::as_str) else {
             return Err("job persist event missing string 'queue_name'".to_owned());
         };
@@ -195,7 +201,7 @@ fn main() {
         };
 
         storage_for_job_persist
-            .upsert_job_record(job_uuid, record, execution_start_ms, queue_name, status)
+            .upsert_job_record(job_uuid, record, execution_start_ms, created_at_ms, queue_name, status)
             .map_err(|error| error.to_string())?;
 
         let mut guard = jobs_pool_for_persist
@@ -1077,6 +1083,143 @@ fn process_worker_client_messages(
                             }
                         }
                     }
+                    Ok(WorkerProtocolAction::JobRequested { request_id, job_id }) => {
+                        let lookup = match jobs_pool.lock() {
+                            Ok(guard) => match guard.resolve_job_lookup(&job_id) {
+                                Ok(lookup) => lookup,
+                                Err(error) => {
+                                    let (code, message) =
+                                        map_jobs_pool_error_for_worker_error(&error);
+                                    let _ = send_worker_protocol_error(
+                                        wire_codec,
+                                        logger,
+                                        &connection,
+                                        worker_id,
+                                        &request_id,
+                                        code,
+                                        &message,
+                                    );
+                                    continue;
+                                }
+                            },
+                            Err(_) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOBS_POOL_LOCK_POISONED",
+                                    "jobs pool lock poisoned while resolving job lookup",
+                                );
+                                continue;
+                            }
+                        };
+
+                        match storage.get_job_payload_by_uuid(lookup.job_uuid) {
+                            Ok(Some(record)) => {
+                                let stored_jid = record
+                                    .get("jid")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or_default();
+                                if stored_jid != job_id {
+                                    match wire_codec
+                                        .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                                    {
+                                        Ok(frame) => {
+                                            write_response_frame(
+                                                &connection,
+                                                &frame,
+                                                connection.id(),
+                                                logger,
+                                                "JOB OK response",
+                                            );
+                                            let _ = pools.workers.touch_now(worker_id);
+                                        }
+                                        Err(error) => {
+                                            logger.warn(
+                                                Some("main::wire"),
+                                                &format!(
+                                                    "failed to build JOB response for worker {worker_id}: {error}"
+                                                ),
+                                            );
+                                        }
+                                    }
+                                    continue;
+                                }
+                                match json_object_to_payload_map(&record) {
+                                    Ok(payload) => match wire_codec
+                                        .encode_frame(&WireEnvelope::ok(request_id, Some(payload)).into_raw())
+                                    {
+                                        Ok(frame) => {
+                                            write_response_frame(
+                                                &connection,
+                                                &frame,
+                                                connection.id(),
+                                                logger,
+                                                "JOB OK response",
+                                            );
+                                            let _ = pools.workers.touch_now(worker_id);
+                                        }
+                                        Err(error) => {
+                                            logger.warn(
+                                                Some("main::wire"),
+                                                &format!(
+                                                    "failed to build JOB response for worker {worker_id}: {error}"
+                                                ),
+                                            );
+                                        }
+                                    },
+                                    Err(message) => {
+                                        let _ = send_worker_protocol_error(
+                                            wire_codec,
+                                            logger,
+                                            &connection,
+                                            worker_id,
+                                            &request_id,
+                                            "JOB_RECORD_INVALID",
+                                            message,
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                match wire_codec
+                                    .encode_frame(&WireEnvelope::ok(request_id, None).into_raw())
+                                {
+                                    Ok(frame) => {
+                                        write_response_frame(
+                                            &connection,
+                                            &frame,
+                                            connection.id(),
+                                            logger,
+                                            "JOB OK response",
+                                        );
+                                        let _ = pools.workers.touch_now(worker_id);
+                                    }
+                                    Err(error) => {
+                                        logger.warn(
+                                            Some("main::wire"),
+                                            &format!(
+                                                "failed to build JOB response for worker {worker_id}: {error}"
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    "JOB_PERSISTENCE_ERROR",
+                                    &format!("failed to load job by id from storage: {error}"),
+                                );
+                            }
+                        }
+                    }
                     Ok(WorkerProtocolAction::RemoveQueueRequested {
                         request_id,
                         queue_name,
@@ -1670,6 +1813,10 @@ fn map_jobs_pool_error_for_worker_error(error: &JobsPoolError) -> (&'static str,
             "SYSTEM_QUEUE_FORBIDDEN",
             format!("queue '{queue_name}' is a system queue and cannot accept jobs"),
         ),
+        JobsPoolError::SystemQueueAccessForbidden { queue_name } => (
+            "SYSTEM_QUEUE_FORBIDDEN",
+            format!("queue '{queue_name}' is a system queue and cannot be accessed"),
+        ),
         JobsPoolError::InvalidMaxAttempts { max_attempts } => (
             "INVALID_MAX_ATTEMPTS",
             format!("max_attempts must be >= 1, got {max_attempts}"),
@@ -1677,6 +1824,10 @@ fn map_jobs_pool_error_for_worker_error(error: &JobsPoolError) -> (&'static str,
         JobsPoolError::InvalidRetryIntervalMs { retry_interval_ms } => (
             "INVALID_RETRY_INTERVAL_MS",
             format!("retry_interval_ms must be > 0, got {retry_interval_ms}"),
+        ),
+        JobsPoolError::InvalidJobId { job_id } => (
+            "INVALID_JOB_ID",
+            format!("job id '{job_id}' is invalid; expected '<queue-name>:<uuid>'"),
         ),
         JobsPoolError::PayloadSerializationFailed(inner) => (
             "INVALID_JOB_PAYLOAD",
@@ -1766,6 +1917,7 @@ fn drain_transient_jobs_pool_before_exit(
                     job.uuid,
                     &record,
                     job.execution_start_at.timestamp_millis(),
+                    job.created_at.timestamp_millis(),
                     &job.queue_name,
                     job_status_to_str(job.status),
                 )
@@ -1834,6 +1986,7 @@ fn build_job_persist_event_payload(job: &Job) -> serde_json::Value {
         "job_uuid": job.uuid.to_string(),
         "record": build_job_record_json(job),
         "execution_start_ms": job.execution_start_at.timestamp_millis(),
+        "created_at_ms": job.created_at.timestamp_millis(),
         "queue_name": job.queue_name,
         "status": job_status_to_str(job.status),
     })
@@ -1944,6 +2097,9 @@ fn apply_persisted_job_status_transition(
             job_uuid,
             &record,
             execution_start_at.timestamp_millis(),
+            extract_created_at(&record)
+                .map(|timestamp| timestamp.timestamp_millis())
+                .unwrap_or_else(|| Utc::now().timestamp_millis()),
             &queue_name,
             target_status_str,
         )
@@ -1958,11 +2114,64 @@ fn extract_execution_start_at(record: &serde_json::Value) -> Option<DateTime<Utc
         .map(|value| value.with_timezone(&Utc))
 }
 
+fn extract_created_at(record: &serde_json::Value) -> Option<DateTime<Utc>> {
+    let raw = record.get("created_at")?.as_str()?;
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
 fn extract_queue_name(record: &serde_json::Value) -> Option<String> {
     record
         .get("queue_name")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
+}
+
+fn json_object_to_payload_map(value: &serde_json::Value) -> Result<PayloadMap, &'static str> {
+    let serde_json::Value::Object(entries) = value else {
+        return Err("persisted job record is not a map object");
+    };
+    let mut payload = PayloadMap::new();
+    for (key, entry) in entries {
+        payload.insert(key.clone(), json_value_to_rmpv(entry)?);
+    }
+    Ok(payload)
+}
+
+fn json_value_to_rmpv(value: &serde_json::Value) -> Result<rmpv::Value, &'static str> {
+    match value {
+        serde_json::Value::Null => Ok(rmpv::Value::Nil),
+        serde_json::Value::Bool(v) => Ok(rmpv::Value::Boolean(*v)),
+        serde_json::Value::Number(v) => {
+            if let Some(raw) = v.as_i64() {
+                Ok(rmpv::Value::Integer(raw.into()))
+            } else if let Some(raw) = v.as_u64() {
+                if raw > i64::MAX as u64 {
+                    Err("persisted job record contains integer above int64 range")
+                } else {
+                    Ok(rmpv::Value::Integer((raw as i64).into()))
+                }
+            } else {
+                Err("persisted job record contains unsupported numeric value")
+            }
+        }
+        serde_json::Value::String(v) => Ok(rmpv::Value::String(v.as_str().into())),
+        serde_json::Value::Array(values) => {
+            let mut out = Vec::with_capacity(values.len());
+            for entry in values {
+                out.push(json_value_to_rmpv(entry)?);
+            }
+            Ok(rmpv::Value::Array(out))
+        }
+        serde_json::Value::Object(values) => {
+            let mut out = Vec::with_capacity(values.len());
+            for (k, v) in values {
+                out.push((rmpv::Value::String(k.as_str().into()), json_value_to_rmpv(v)?));
+            }
+            Ok(rmpv::Value::Map(out))
+        }
+    }
 }
 
 fn job_status_to_str(status: JobStatus) -> &'static str {

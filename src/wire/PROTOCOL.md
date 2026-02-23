@@ -283,6 +283,25 @@ Constraints:
 - worker does not need subscription to enqueue into a queue
 - envelope payload (`p`) and nested `job_payload` are distinct scopes
 
+### JOB (worker client -> server)
+
+- Message type: `t=15`
+- Allowed only for registered workers.
+- Payload:
+  - `jid` (`string`, required): full job id (`<queue-name>:<uuid>`)
+
+Response:
+
+- success (`job exists`): `OK` (`t=101`) payload with full persisted job record
+- success (`job missing`): `OK` (`t=101`) with empty payload
+- failure: `ERR` (`t=102`) with standard error payload
+
+Constraints:
+
+- access is allowed for any registered worker regardless of queue subscriptions
+- jobs on system queues (`_` prefix) cannot be accessed through this flow
+- jid parsing/validation is routed through jobs pool module while data load is direct from storage
+
 ## Implemented Worker Subscription Flow
 
 ### SUBSCRIBE (worker client -> server)

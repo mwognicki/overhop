@@ -13,10 +13,10 @@ use crate::wire::codec::{FRAME_HEADER_SIZE_BYTES, WireCodec};
 use crate::wire::envelope::{PayloadMap, WireEnvelope};
 use crate::wire::handshake::HELLO_MESSAGE_TYPE;
 use crate::wire::session::{
-    ADDQUEUE_MESSAGE_TYPE, CREDIT_MESSAGE_TYPE, ENQUEUE_MESSAGE_TYPE, LSQUEUE_MESSAGE_TYPE,
-    PAUSE_MESSAGE_TYPE, PING_MESSAGE_TYPE, QUEUE_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE,
-    RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, STATUS_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE,
-    UNSUBSCRIBE_MESSAGE_TYPE,
+    ADDQUEUE_MESSAGE_TYPE, CREDIT_MESSAGE_TYPE, ENQUEUE_MESSAGE_TYPE, JOB_MESSAGE_TYPE,
+    LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE, PING_MESSAGE_TYPE, QUEUE_MESSAGE_TYPE,
+    REGISTER_MESSAGE_TYPE, RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, STATUS_MESSAGE_TYPE,
+    SUBSCRIBE_MESSAGE_TYPE, UNSUBSCRIBE_MESSAGE_TYPE,
 };
 
 const COLOR_HEADER: &str = "\x1b[38;5;214m";
@@ -291,14 +291,7 @@ pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebu
             (Value::String("kind".into()), Value::String("poc".into())),
         ]),
     );
-    let enqueue = send_and_receive(
-        &mut stream,
-        &codec,
-        ENQUEUE_MESSAGE_TYPE,
-        "sd-15",
-        enqueue_payload,
-    )?;
-    let _jid = require_string(&enqueue.payload, "jid")?;
+    enqueue_then_fetch_job(&mut stream, &codec, "sd-15", "sd-16", enqueue_payload)?;
 
     println!("{COLOR_HEADER}====== SELF DEBUG MODE COMPLETE ======{RESET}");
     Ok(())
@@ -334,6 +327,29 @@ fn send_and_receive(
     }
 
     Ok(incoming)
+}
+
+fn enqueue_then_fetch_job(
+    stream: &mut TcpStream,
+    codec: &WireCodec,
+    enqueue_request_id: &str,
+    job_request_id: &str,
+    enqueue_payload: PayloadMap,
+) -> Result<(), SelfDebugError> {
+    let enqueue = send_and_receive(
+        stream,
+        codec,
+        ENQUEUE_MESSAGE_TYPE,
+        enqueue_request_id,
+        enqueue_payload,
+    )?;
+    let jid = require_string(&enqueue.payload, "jid")?;
+
+    let mut job_payload = PayloadMap::new();
+    job_payload.insert("jid".to_owned(), Value::String(jid.into()));
+    let _ = send_and_receive(stream, codec, JOB_MESSAGE_TYPE, job_request_id, job_payload)?;
+
+    Ok(())
 }
 
 fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>, SelfDebugError> {
@@ -437,6 +453,7 @@ fn message_type_name(message_type: i64) -> &'static str {
         PAUSE_MESSAGE_TYPE => "PAUSE",
         RESUME_MESSAGE_TYPE => "RESUME",
         ENQUEUE_MESSAGE_TYPE => "ENQUEUE",
+        JOB_MESSAGE_TYPE => "JOB",
         STATUS_MESSAGE_TYPE => "STATUS",
         crate::wire::envelope::SERVER_OK_MESSAGE_TYPE => "OK",
         crate::wire::envelope::SERVER_ERR_MESSAGE_TYPE => "ERR",

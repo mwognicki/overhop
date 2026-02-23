@@ -32,11 +32,14 @@ Provide a pluggable storage facade so business/domain modules depend on stable s
   - jobs (primary): `v1:j:<job-uuid>`
   - jobs queue-time index: `v1:j_qt:<execution-start-ms>:<queue-name>:<job-uuid>`
   - jobs status value key: `v1:status:<job-uuid>`
+  - jobs status FIFO index: `v1:status_fifo:<status>:<created-at-ms-be>:<job-uuid-bytes>`
 - Queue records are scanned by prefix (`v1:q:`) for full queue-state restoration.
 - Job-by-UUID lookup is direct by exact key (`v1:j:<uuid>`).
 - Queue-time index sorts by execution start first, then queue name, then job uuid.
 - Queue-time index is intended for future range/limit/offset style retrieval by earliest execution time.
 - Status key stores mutable status value and is optimized for frequent updates.
+- Status FIFO index allows deterministic status-scoped processing order by `created_at` ascending (FIFO for `waiting` jobs).
+- Numeric components used for ordered scans are encoded to big-endian sortable bytes for sled iterator correctness.
 - Key prefixes are immutable and versioned to allow future keyspace migrations without breaking existing data.
 
 ## Most Relevant Features

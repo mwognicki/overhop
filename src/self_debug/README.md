@@ -15,7 +15,8 @@ Run an in-process wire protocol self-check by acting as a local Overhop client a
 
 ## Most Relevant Features
 
-- Exercises currently implemented protocol flow (`HELLO`, `REGISTER`, queue ops including `RMQUEUE`, `ENQUEUE`, subscriptions, `CREDIT`, `STATUS`, `PING`).
+- Exercises currently implemented protocol flow (`HELLO`, `REGISTER`, queue ops including `RMQUEUE`, `ENQUEUE`, `JOB`, subscriptions, `CREDIT`, `STATUS`, `PING`).
+- Every self-debug `ENQUEUE` request is immediately followed by a `JOB` lookup using the returned `jid`.
 - Leaves one additional self-debug queue persisted at the end of a run and applies `PAUSE` -> `RESUME` on that last created queue to validate persisted queue state flow across sessions.
 - Keeps self-debug logic isolated from domain/business modules.
 - Cleans self-debug storage artifacts after run completion (success or error) by default, then returns/propagates run result.

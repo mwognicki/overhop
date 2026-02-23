@@ -72,6 +72,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Registered workers may use RMQUEUE (`t=11`, payload `q`) to remove non-system queues only (`_`-prefixed queues are protected).
    - Registered workers may use PAUSE (`t=12`, payload `q`) and RESUME (`t=13`, payload `q`) for non-system queue state transitions.
    - Registered workers may use ENQUEUE (`t=14`) to push jobs to non-system queues, with optional `job_payload`, `scheduled_at`, `max_attempts`, and `retry_interval_ms`.
+   - Registered workers may use JOB (`t=15`, payload `jid`) to fetch persisted job records by id; system-queue jobs remain inaccessible.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Anonymous metadata should track optional IDENT reply deadline timestamp when IDENT challenge is issued.
@@ -88,6 +89,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Job IDs must follow `<queue-name>:<job-uuid>` while enqueue API returns the generated job UUID.
    - Default new-job status is `new`, and execution start timestamp must be `scheduled_at` or immediate time.
    - Job runtime metadata must include `attempts_so_far`, initialized as `0` on job creation.
+   - Jobs must be stamped with immutable `created_at` at transient staging time and persisted with the job record.
    - Optional retry interval must be strictly positive when provided.
    - Jobs pool is transient staging only; enqueue stages in memory, emits persistence event, and successful persistence must evict staged job from pool.
    - Shutdown should best-effort flush remaining staged jobs to persistence before exit, and pause briefly (100 ms) after pool drain.
@@ -98,7 +100,8 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep storage initialization fail-fast before TCP server startup.
    - Keep default data path rooted at `~/.overhop/data` with `~/` and `$HOME/` expansion support.
    - Keep engine-specific details behind storage backend abstractions so domain logic stays engine-agnostic.
-   - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` primary jobs, `v1:j_qt:` queue-time job index, `v1:status:` job status key).
+   - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` primary jobs, `v1:j_qt:` queue-time job index, `v1:status:` job status key, `v1:status_fifo:` status FIFO index ordered by `created_at`).
+   - Keep ordered numeric key fragments encoded in big-endian sortable form for sled iterator correctness.
    - Keep storage abstraction and concrete engine implementations separated into dedicated files/modules.
 24. Persistent queue bootstrap flow is implemented in `src/orchestrator/queues/persistent.rs`:
    - On first run, persist and preload `_system` queue.

@@ -25,6 +25,7 @@ Provide a transient jobs staging pool abstraction for queue-aware job creation w
   - optional `retry_interval_ms` (`u64`, must be `> 0` if provided)
 - `Job`
   - immutable UUID and derived `job_id`
+  - immutable `created_at` assigned immediately when staged in transient pool
   - default status `new`
   - execution start timestamp from `scheduled_at` or immediate `Utc::now()`
   - `runtime.attempts_so_far` counter initialized to `0`

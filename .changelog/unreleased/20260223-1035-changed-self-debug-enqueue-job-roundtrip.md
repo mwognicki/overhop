@@ -1,0 +1,3 @@
+- updated self-debug flow to execute `JOB` immediately after each `ENQUEUE` using the returned `jid`
+- refactored self-debug enqueue path into explicit `ENQUEUE -> JOB` roundtrip helper to keep protocol checks consistent
+- refreshed self-debug module README to document the new enqueue/job verification step

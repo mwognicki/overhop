@@ -55,12 +55,21 @@ pub struct JobsPoolSnapshot {
     pub jobs: Vec<Job>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JobLookup {
+    pub job_id: String,
+    pub queue_name: String,
+    pub job_uuid: Uuid,
+}
+
 #[derive(Debug)]
 pub enum JobsPoolError {
     QueueNotFound { queue_name: String },
     SystemQueueForbidden { queue_name: String },
+    SystemQueueAccessForbidden { queue_name: String },
     InvalidMaxAttempts { max_attempts: u32 },
     InvalidRetryIntervalMs { retry_interval_ms: u64 },
+    InvalidJobId { job_id: String },
     PayloadSerializationFailed(serde_json::Error),
 }
 
@@ -73,11 +82,17 @@ impl fmt::Display for JobsPoolError {
             Self::SystemQueueForbidden { queue_name } => {
                 write!(f, "queue '{queue_name}' is a system queue and cannot accept jobs")
             }
+            Self::SystemQueueAccessForbidden { queue_name } => {
+                write!(f, "queue '{queue_name}' is a system queue and cannot be accessed")
+            }
             Self::InvalidMaxAttempts { max_attempts } => {
                 write!(f, "max_attempts must be >= 1 when provided, got {max_attempts}")
             }
             Self::InvalidRetryIntervalMs { retry_interval_ms } => {
                 write!(f, "retry interval must be > 0 when provided, got {retry_interval_ms}")
+            }
+            Self::InvalidJobId { job_id } => {
+                write!(f, "job id '{job_id}' is invalid; expected '<queue-name>:<uuid>'")
             }
             Self::PayloadSerializationFailed(source) => {
                 write!(f, "job payload serialization failed: {source}")
@@ -171,12 +186,41 @@ impl JobsPool {
     pub fn remove_job(&mut self, uuid: Uuid) -> Option<Job> {
         self.jobs.remove(&uuid)
     }
+
+    pub fn resolve_job_lookup(&self, job_id: &str) -> Result<JobLookup, JobsPoolError> {
+        let Some((queue_name, uuid_raw)) = job_id.split_once(':') else {
+            return Err(JobsPoolError::InvalidJobId {
+                job_id: job_id.to_owned(),
+            });
+        };
+        if queue_name.is_empty() {
+            return Err(JobsPoolError::InvalidJobId {
+                job_id: job_id.to_owned(),
+            });
+        }
+        let Ok(job_uuid) = Uuid::parse_str(uuid_raw) else {
+            return Err(JobsPoolError::InvalidJobId {
+                job_id: job_id.to_owned(),
+            });
+        };
+        if queue_name.starts_with('_') {
+            return Err(JobsPoolError::SystemQueueAccessForbidden {
+                queue_name: queue_name.to_owned(),
+            });
+        }
+        Ok(JobLookup {
+            job_id: job_id.to_owned(),
+            queue_name: queue_name.to_owned(),
+            job_uuid,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
     use serde_json::json;
+    use uuid::Uuid;
 
     use crate::orchestrator::queues::QueuePool;
 
@@ -324,6 +368,27 @@ mod tests {
         let removed = jobs_pool.remove_job(staged_uuid);
         assert!(removed.is_some());
         assert_eq!(jobs_pool.count(), 0);
+    }
+
+    #[test]
+    fn resolve_job_lookup_validates_and_extracts_parts() {
+        let jobs_pool = JobsPool::new();
+        let uuid = Uuid::new_v4();
+        let lookup = jobs_pool
+            .resolve_job_lookup(&format!("critical:{uuid}"))
+            .expect("jid should parse");
+        assert_eq!(lookup.queue_name, "critical");
+        assert_eq!(lookup.job_uuid, uuid);
+
+        let invalid = jobs_pool
+            .resolve_job_lookup("invalid-jid")
+            .expect_err("invalid jid should fail");
+        assert!(matches!(invalid, JobsPoolError::InvalidJobId { .. }));
+
+        let sys = jobs_pool
+            .resolve_job_lookup(&format!("_system:{uuid}"))
+            .expect_err("system queue jid should fail");
+        assert!(matches!(sys, JobsPoolError::SystemQueueAccessForbidden { .. }));
     }
 
     #[test]
