@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["timing"]};
+window.SIDEBAR_ITEMS = {"mod":["runtime","startup_banner","timing"]};
