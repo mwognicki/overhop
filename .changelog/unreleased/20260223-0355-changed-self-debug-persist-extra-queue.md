@@ -1,0 +1,2 @@
+- extended self-debug flow to send an extra `ADDQUEUE` after `RMQUEUE`, leaving one queue persisted at run end for cross-session storage checks
+- documented persisted-queue behavior in self-debug module README

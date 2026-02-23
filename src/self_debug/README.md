@@ -16,6 +16,7 @@ Run an in-process wire protocol self-check by acting as a local Overhop client a
 ## Most Relevant Features
 
 - Exercises currently implemented protocol flow (`HELLO`, `REGISTER`, queue ops including `RMQUEUE`, subscriptions, `CREDIT`, `STATUS`, `PING`).
+- Leaves one additional self-debug queue persisted at the end of a run to validate storage usability across consecutive sessions.
 - Keeps self-debug logic isolated from domain/business modules.
 - Cleans self-debug storage artifacts after run completion (success or error) by default, then returns/propagates run result.
 - Preserves production startup path when mode is not enabled.

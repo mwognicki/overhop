@@ -223,13 +223,27 @@ pub fn run_self_debug(addr: SocketAddr, codec: WireCodec) -> Result<(), SelfDebu
     )?;
 
     let mut rmqueue_payload = PayloadMap::new();
-    rmqueue_payload.insert("q".to_owned(), Value::String(queue_name.into()));
+    rmqueue_payload.insert("q".to_owned(), Value::String(queue_name.clone().into()));
     let _ = send_and_receive(
         &mut stream,
         &codec,
         RMQUEUE_MESSAGE_TYPE,
         "sd-11",
         rmqueue_payload,
+    )?;
+
+    let mut addqueue_persisted_payload = PayloadMap::new();
+    let persisted_queue_name = format!(
+        "self_debug_persisted_{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    );
+    addqueue_persisted_payload.insert("name".to_owned(), Value::String(persisted_queue_name.into()));
+    let _ = send_and_receive(
+        &mut stream,
+        &codec,
+        ADDQUEUE_MESSAGE_TYPE,
+        "sd-12",
+        addqueue_persisted_payload,
     )?;
 
     println!("{COLOR_HEADER}====== SELF DEBUG MODE COMPLETE ======{RESET}");
