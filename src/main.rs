@@ -1474,6 +1474,14 @@ fn map_persistent_queue_error_for_worker_error(
             "DUPLICATE_QUEUE",
             format!("queue '{queue_name}' is already registered"),
         ),
+        PersistentQueuePoolError::QueuePool(
+            orchestrator::queues::QueuePoolError::InvalidQueueName { .. },
+        ) => (
+            "INVALID_QUEUE_NAME",
+            format!(
+                "queue '{queue_name}' is invalid (allowed: [A-Za-z0-9_-], first char must be alphanumeric)"
+            ),
+        ),
         PersistentQueuePoolError::QueuePool(orchestrator::queues::QueuePoolError::QueueNotFound {
             ..
         }) => (

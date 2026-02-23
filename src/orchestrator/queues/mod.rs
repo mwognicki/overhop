@@ -69,6 +69,7 @@ pub struct QueuePoolSnapshot {
 #[derive(Debug)]
 pub enum QueuePoolError {
     DuplicateQueueName { name: String },
+    InvalidQueueName { name: String },
     QueueNotFound { name: String },
     SystemQueueRemovalForbidden { name: String },
     Serialize(serde_json::Error),
@@ -81,6 +82,10 @@ impl fmt::Display for QueuePoolError {
             Self::DuplicateQueueName { name } => {
                 write!(f, "queue '{name}' is already registered")
             }
+            Self::InvalidQueueName { name } => write!(
+                f,
+                "queue '{name}' is invalid (allowed: [A-Za-z0-9_-], first char must be alphanumeric)"
+            ),
             Self::QueueNotFound { name } => write!(f, "queue '{name}' not found"),
             Self::SystemQueueRemovalForbidden { name } => {
                 write!(f, "queue '{name}' is a system queue and cannot be removed")
@@ -156,6 +161,7 @@ impl QueuePool {
         config: Option<QueueConfig>,
     ) -> Result<Uuid, QueuePoolError> {
         let name = name.into();
+        validate_queue_name(&name)?;
         if self.queues.contains_key(&name) {
             return Err(QueuePoolError::DuplicateQueueName { name });
         }
@@ -224,6 +230,26 @@ impl QueuePool {
 
 fn new_queue_id() -> Uuid {
     Uuid::new_v4()
+}
+
+fn validate_queue_name(name: &str) -> Result<(), QueuePoolError> {
+    let mut chars = name.chars();
+    let Some(first_char) = chars.next() else {
+        return Err(QueuePoolError::InvalidQueueName {
+            name: name.to_owned(),
+        });
+    };
+    if !first_char.is_ascii_alphanumeric() {
+        return Err(QueuePoolError::InvalidQueueName {
+            name: name.to_owned(),
+        });
+    }
+    if chars.any(|ch| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_') {
+        return Err(QueuePoolError::InvalidQueueName {
+            name: name.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -323,11 +349,11 @@ mod tests {
 
     #[test]
     fn remove_queue_rejects_system_queue_and_removes_regular_queue() {
-        let mut pool = QueuePool::new();
-        pool.register_queue("_system", None)
-            .expect("system queue should register");
-        pool.register_queue("critical", None)
-            .expect("critical queue should register");
+        let mut pool = QueuePool::reconstruct(vec![
+            super::Queue::new("_system", None),
+            super::Queue::new("critical", None),
+        ])
+        .expect("seeded queue reconstruct should pass");
 
         let err = pool
             .remove_queue("_system")
@@ -340,5 +366,20 @@ mod tests {
         pool.remove_queue("critical")
             .expect("regular queue removal should pass");
         assert!(pool.get_queue("critical").is_none());
+    }
+
+    #[test]
+    fn queue_name_must_match_allowed_pattern() {
+        let mut pool = QueuePool::new();
+        pool.register_queue("queue_01-prod", None)
+            .expect("valid name should pass");
+
+        let invalid_names = ["", "-bad", "_bad", "bad space", "bad.dot", "ąlpha"];
+        for invalid in invalid_names {
+            let err = pool
+                .register_queue(invalid, None)
+                .expect_err("invalid queue name should fail");
+            assert!(matches!(err, QueuePoolError::InvalidQueueName { .. }));
+        }
     }
 }

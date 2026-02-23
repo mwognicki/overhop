@@ -185,6 +185,9 @@ Response (`OK`, `t=101`):
 Failure mode:
 
 - returns `ERR` (`t=102`) if queue already exists or persistence fails
+- queue name validation rules:
+  - first character must be ASCII letter or digit
+  - remaining characters may be ASCII letters, digits, `_`, or `-`
 
 ### STATUS (worker client -> server)
 
