@@ -13,7 +13,12 @@ pub enum JobStatus {
     New,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JobRuntimeMetadata {
+    pub attempts_so_far: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Job {
     pub uuid: Uuid,
     pub job_id: String,
@@ -24,6 +29,7 @@ pub struct Job {
     pub max_attempts: Option<u32>,
     pub retry_interval_ms: Option<u64>,
     pub created_at: DateTime<Utc>,
+    pub runtime: JobRuntimeMetadata,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -85,6 +91,8 @@ impl std::error::Error for JobsStorageError {}
 #[derive(Debug)]
 pub enum JobsPoolError {
     QueueNotFound { queue_name: String },
+    SystemQueueForbidden { queue_name: String },
+    InvalidMaxAttempts { max_attempts: u32 },
     InvalidRetryIntervalMs { retry_interval_ms: u64 },
     PayloadSerializationFailed(serde_json::Error),
     Storage(JobsStorageError),
@@ -95,6 +103,12 @@ impl fmt::Display for JobsPoolError {
         match self {
             Self::QueueNotFound { queue_name } => {
                 write!(f, "queue '{queue_name}' not found")
+            }
+            Self::SystemQueueForbidden { queue_name } => {
+                write!(f, "queue '{queue_name}' is a system queue and cannot accept jobs")
+            }
+            Self::InvalidMaxAttempts { max_attempts } => {
+                write!(f, "max_attempts must be >= 1 when provided, got {max_attempts}")
             }
             Self::InvalidRetryIntervalMs { retry_interval_ms } => {
                 write!(f, "retry interval must be > 0 when provided, got {retry_interval_ms}")
@@ -157,6 +171,17 @@ impl JobsPool {
                 queue_name: queue_name.to_owned(),
             });
         }
+        if queue_name.starts_with('_') {
+            return Err(JobsPoolError::SystemQueueForbidden {
+                queue_name: queue_name.to_owned(),
+            });
+        }
+
+        if let Some(max_attempts) = options.max_attempts {
+            if max_attempts == 0 {
+                return Err(JobsPoolError::InvalidMaxAttempts { max_attempts });
+            }
+        }
 
         if let Some(retry_interval_ms) = options.retry_interval_ms {
             if retry_interval_ms == 0 {
@@ -176,6 +201,7 @@ impl JobsPool {
             max_attempts: options.max_attempts,
             retry_interval_ms: options.retry_interval_ms,
             created_at: Utc::now(),
+            runtime: JobRuntimeMetadata { attempts_so_far: 0 },
         };
 
         self.jobs.insert(uuid, job);
@@ -262,6 +288,7 @@ mod tests {
         assert!(job.payload.is_none());
         assert_eq!(job.max_attempts, None);
         assert_eq!(job.retry_interval_ms, None);
+        assert_eq!(job.runtime.attempts_so_far, 0);
     }
 
     #[test]
@@ -314,6 +341,43 @@ mod tests {
             .expect_err("zero retry interval should fail");
 
         assert!(matches!(err, JobsPoolError::InvalidRetryIntervalMs { .. }));
+    }
+
+    #[test]
+    fn enqueue_rejects_zero_max_attempts() {
+        let mut queue_pool = QueuePool::new();
+        queue_pool
+            .register_queue("jobs", None)
+            .expect("queue should register");
+        let mut jobs_pool = JobsPool::new();
+
+        let err = jobs_pool
+            .enqueue_job(
+                &queue_pool,
+                "jobs",
+                NewJobOptions {
+                    max_attempts: Some(0),
+                    ..NewJobOptions::default()
+                },
+            )
+            .expect_err("zero max_attempts should fail");
+
+        assert!(matches!(err, JobsPoolError::InvalidMaxAttempts { .. }));
+    }
+
+    #[test]
+    fn enqueue_rejects_system_queue() {
+        let queue_pool = QueuePool::reconstruct(vec![crate::orchestrator::queues::Queue::new(
+            "_system",
+            None,
+        )])
+        .expect("queue reconstruct should pass");
+        let mut jobs_pool = JobsPool::new();
+
+        let err = jobs_pool
+            .enqueue_job(&queue_pool, "_system", NewJobOptions::default())
+            .expect_err("enqueue should fail for system queue");
+        assert!(matches!(err, JobsPoolError::SystemQueueForbidden { .. }));
     }
 
     #[test]

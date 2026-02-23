@@ -15,6 +15,7 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Supports worker queue registration request (`ADDQUEUE`) parsing/validation.
 - Supports worker queue removal request (`RMQUEUE`) parsing/validation.
 - Supports worker queue state messages (`PAUSE`, `RESUME`) parsing/validation.
+- Supports worker job enqueue request (`ENQUEUE`) parsing/validation.
 - Supports worker subscription flow requests (`SUBSCRIBE`, `UNSUBSCRIBE`) parsing/validation.
 - Supports worker credit increment request (`CREDIT`) parsing/validation.
 - Supports worker diagnostics snapshot request (`STATUS`) parsing/validation.
@@ -31,6 +32,7 @@ Enforce anonymous-client message ordering rules and produce protocol-level respo
 - Worker `ADDQUEUE` payload must include queue `name` and optional `config`.
 - Worker `RMQUEUE` payload must include queue name under `q`.
 - Worker `PAUSE`/`RESUME` payloads must include queue name under `q`.
+- Worker `ENQUEUE` payload distinguishes envelope payload map from nested optional `job_payload`.
 - Worker `SUBSCRIBE` payload must include queue name under `q`, with optional non-negative `credits`.
 - Worker `UNSUBSCRIBE` payload must include `sid` as UUID string.
 - Worker `CREDIT` payload must include `sid` (UUID string) and positive `credits` amount.

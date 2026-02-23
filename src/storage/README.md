@@ -15,7 +15,7 @@ Provide a pluggable storage facade so business/domain modules depend on stable s
 - `StorageFacade`
   - owns active storage backend
   - stores resolved data path and active engine metadata
-  - exposes queue/job retrieval-oriented backend-agnostic operations
+  - exposes queue/job persistence and retrieval-oriented backend-agnostic operations
 - `StorageBackend`
   - trait boundary for engine-specific implementations
 - `src/storage/sled_backend.rs`
@@ -41,5 +41,6 @@ Provide a pluggable storage facade so business/domain modules depend on stable s
   - `storage.sled.cache_capacity` (optional)
   - `storage.sled.mode` (`low_space` or `high_throughput`, optional)
 - Queue persistence supports full-set replacement (`replace_queues`) for deterministic persist-first/reload flows.
+- Job persistence supports upsert by UUID (`upsert_job_record`) for enqueue flows.
 - Significant initialization events are logged from this module.
 - Initialization errors are surfaced to startup flow and terminate application startup.

@@ -1,0 +1,6 @@
+- added worker wire message `ENQUEUE` (`t=14`) with payload validation for queue target, optional job payload, scheduling timestamp, max attempts, and retry interval
+- implemented runtime ENQUEUE handling for registered workers with OK payload including generated `jid`, resolved `execution_start_at`, and `attempts_so_far`
+- added queue safety checks for enqueue (queue must exist and must not be a system queue)
+- extended jobs model with nested runtime metadata (`attempts_so_far`) initialized to `0` on creation
+- added storage upsert operation for persisted job records and integrated jobs pool persistence via storage-backed adapter
+- updated wire/jobs/storage docs and protocol spec for ENQUEUE flow and constraints
