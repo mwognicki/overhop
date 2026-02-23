@@ -16,6 +16,7 @@ pub enum StorageError {
     },
     SerializeQueue(serde_json::Error),
     DeserializeQueue(serde_json::Error),
+    SerializeJob(serde_json::Error),
     DeserializeJob(serde_json::Error),
     Sled(sled::Error),
 }
@@ -47,8 +48,11 @@ impl fmt::Display for StorageError {
             Self::DeserializeQueue(source) => {
                 write!(f, "failed to deserialize queue from storage: {source}")
             }
+            Self::SerializeJob(source) => {
+                write!(f, "failed to serialize job record for storage: {source}")
+            }
             Self::DeserializeJob(source) => {
-                write!(f, "failed to deserialize job payload from storage: {source}")
+                write!(f, "failed to deserialize job record from storage: {source}")
             }
             Self::Sled(source) => write!(f, "sled storage error: {source}"),
         }

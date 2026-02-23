@@ -82,6 +82,18 @@ impl StorageBackend for SledStorage {
         Ok(())
     }
 
+    fn upsert_job_record(
+        &self,
+        job_uuid: Uuid,
+        record: &serde_json::Value,
+    ) -> Result<(), StorageError> {
+        let key = job_key(job_uuid);
+        let raw = serde_json::to_vec(record).map_err(StorageError::SerializeJob)?;
+        self.db.insert(key.as_bytes(), raw).map_err(StorageError::Sled)?;
+        self.db.flush().map_err(StorageError::Sled)?;
+        Ok(())
+    }
+
     fn get_job_payload_by_uuid(
         &self,
         job_uuid: Uuid,

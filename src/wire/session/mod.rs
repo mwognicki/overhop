@@ -1,5 +1,6 @@
 use std::fmt;
 
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::orchestrator::queues::QueueConfig;
@@ -19,6 +20,7 @@ pub const STATUS_MESSAGE_TYPE: i64 = 10;
 pub const RMQUEUE_MESSAGE_TYPE: i64 = 11;
 pub const PAUSE_MESSAGE_TYPE: i64 = 12;
 pub const RESUME_MESSAGE_TYPE: i64 = 13;
+pub const ENQUEUE_MESSAGE_TYPE: i64 = 14;
 pub const IDENT_MESSAGE_TYPE: i64 = 104;
 pub const PONG_MESSAGE_TYPE: i64 = 105;
 pub const PROTOCOL_VIOLATION_CODE: &str = "PROTOCOL_VIOLATION";
@@ -52,6 +54,14 @@ pub enum WorkerProtocolAction {
     ResumeQueueRequested {
         request_id: String,
         queue_name: String,
+    },
+    EnqueueRequested {
+        request_id: String,
+        queue_name: String,
+        job_payload: Option<serde_json::Value>,
+        scheduled_at: Option<DateTime<Utc>>,
+        max_attempts: Option<u32>,
+        retry_interval_ms: Option<u64>,
     },
     SubscribeRequested {
         request_id: String,
@@ -332,6 +342,112 @@ pub fn evaluate_worker_client_frame(
             });
         }
 
+        if envelope.message_type == ENQUEUE_MESSAGE_TYPE {
+            let queue_name = envelope
+                .payload
+                .get("q")
+                .and_then(rmpv::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::ProtocolViolation {
+                    request_id: Some(envelope.request_id.clone()),
+                    code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                    message: "ENQUEUE payload must contain string key 'q'".to_owned(),
+                })?;
+
+            let job_payload = match envelope.payload.get("job_payload") {
+                Some(value) => Some(rmpv_value_to_json(value).map_err(|message| {
+                    SessionError::ProtocolViolation {
+                        request_id: Some(envelope.request_id.clone()),
+                        code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                        message: format!("ENQUEUE payload key 'job_payload' {message}"),
+                    }
+                })?),
+                None => None,
+            };
+
+            let scheduled_at = match envelope.payload.get("scheduled_at") {
+                Some(value) => {
+                    let Some(raw) = value.as_str() else {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message: "ENQUEUE payload key 'scheduled_at' must be RFC3339 string"
+                                .to_owned(),
+                        });
+                    };
+                    Some(DateTime::parse_from_rfc3339(raw).map_err(|_| {
+                        SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message:
+                                "ENQUEUE payload key 'scheduled_at' must be valid RFC3339 timestamp"
+                                    .to_owned(),
+                        }
+                    })?
+                    .with_timezone(&Utc))
+                }
+                None => None,
+            };
+
+            let max_attempts = match envelope.payload.get("max_attempts") {
+                Some(value) => {
+                    let Some(raw) = value.as_i64() else {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message:
+                                "ENQUEUE payload key 'max_attempts' must be integer >= 1".to_owned(),
+                        });
+                    };
+                    if raw < 1 || raw > u32::MAX as i64 {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message:
+                                "ENQUEUE payload key 'max_attempts' must be in range 1..=u32::MAX"
+                                    .to_owned(),
+                        });
+                    }
+                    Some(raw as u32)
+                }
+                None => None,
+            };
+
+            let retry_interval_ms = match envelope.payload.get("retry_interval_ms") {
+                Some(value) => {
+                    let Some(raw) = value.as_i64() else {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message:
+                                "ENQUEUE payload key 'retry_interval_ms' must be integer > 0"
+                                    .to_owned(),
+                        });
+                    };
+                    if raw < 1 {
+                        return Err(SessionError::ProtocolViolation {
+                            request_id: Some(envelope.request_id.clone()),
+                            code: PROTOCOL_VIOLATION_CODE.to_owned(),
+                            message:
+                                "ENQUEUE payload key 'retry_interval_ms' must be integer > 0"
+                                    .to_owned(),
+                        });
+                    }
+                    Some(raw as u64)
+                }
+                None => None,
+            };
+
+            return Ok(WorkerProtocolAction::EnqueueRequested {
+                request_id: envelope.request_id,
+                queue_name,
+                job_payload,
+                scheduled_at,
+                max_attempts,
+                retry_interval_ms,
+            });
+        }
+
         if envelope.message_type == SUBSCRIBE_MESSAGE_TYPE {
             let queue_name = envelope
                 .payload
@@ -456,7 +572,7 @@ pub fn evaluate_worker_client_frame(
             request_id: Some(envelope.request_id),
             code: PROTOCOL_VIOLATION_CODE.to_owned(),
             message:
-                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, PAUSE, RESUME, or STATUS"
+                "registered workers can currently send only PING, QUEUE, LSQUEUE, SUBSCRIBE, UNSUBSCRIBE, CREDIT, ADDQUEUE, RMQUEUE, PAUSE, RESUME, ENQUEUE, or STATUS"
                     .to_owned(),
         });
     }
@@ -547,6 +663,40 @@ fn to_protocol_if_handshake_error(
     }
 }
 
+fn rmpv_value_to_json(value: &rmpv::Value) -> Result<serde_json::Value, &'static str> {
+    match value {
+        rmpv::Value::Nil => Ok(serde_json::Value::Null),
+        rmpv::Value::Boolean(v) => Ok(serde_json::Value::Bool(*v)),
+        rmpv::Value::Integer(v) => {
+            if let Some(raw) = v.as_i64() {
+                Ok(serde_json::json!(raw))
+            } else {
+                Err("contains unsupported integer representation")
+            }
+        }
+        rmpv::Value::String(v) => Ok(serde_json::json!(v.as_str().unwrap_or_default())),
+        rmpv::Value::Binary(v) => Ok(serde_json::json!(v)),
+        rmpv::Value::Array(values) => {
+            let mut converted = Vec::with_capacity(values.len());
+            for entry in values {
+                converted.push(rmpv_value_to_json(entry)?);
+            }
+            Ok(serde_json::Value::Array(converted))
+        }
+        rmpv::Value::Map(entries) => {
+            let mut map = serde_json::Map::new();
+            for (key, value) in entries {
+                let Some(text_key) = key.as_str() else {
+                    return Err("contains non-string map key");
+                };
+                map.insert(text_key.to_owned(), rmpv_value_to_json(value)?);
+            }
+            Ok(serde_json::Value::Object(map))
+        }
+        _ => Err("contains unsupported value type"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::wire::codec::CodecConfig;
@@ -554,10 +704,11 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        ADDQUEUE_MESSAGE_TYPE, AnonymousProtocolAction, CREDIT_MESSAGE_TYPE, IDENT_MESSAGE_TYPE,
-        LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE, QUEUE_MESSAGE_TYPE,
-        RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE, PING_MESSAGE_TYPE,
-        PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE, WorkerProtocolAction,
+        ADDQUEUE_MESSAGE_TYPE, AnonymousProtocolAction, CREDIT_MESSAGE_TYPE, ENQUEUE_MESSAGE_TYPE,
+        IDENT_MESSAGE_TYPE, LSQUEUE_MESSAGE_TYPE, PAUSE_MESSAGE_TYPE, PROTOCOL_VIOLATION_CODE,
+        QUEUE_MESSAGE_TYPE, RESUME_MESSAGE_TYPE, RMQUEUE_MESSAGE_TYPE, SUBSCRIBE_MESSAGE_TYPE,
+        PING_MESSAGE_TYPE, PONG_MESSAGE_TYPE, REGISTER_MESSAGE_TYPE, STATUS_MESSAGE_TYPE,
+        WorkerProtocolAction,
         UNSUBSCRIBE_MESSAGE_TYPE,
         build_ident_frame, build_pong_frame, build_protocol_error_frame,
         evaluate_anonymous_client_frame, evaluate_worker_client_frame,
@@ -967,6 +1118,46 @@ mod tests {
                 queue_name: "critical".to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn worker_enqueue_validates_and_accepts_payload() {
+        let codec = crate::wire::codec::WireCodec::new(CodecConfig::default());
+        let mut payload = PayloadMap::new();
+        payload.insert("q".to_owned(), rmpv::Value::String("critical".into()));
+        payload.insert(
+            "scheduled_at".to_owned(),
+            rmpv::Value::String("2026-02-23T12:00:00Z".into()),
+        );
+        payload.insert("max_attempts".to_owned(), rmpv::Value::Integer(3_i64.into()));
+        payload.insert(
+            "retry_interval_ms".to_owned(),
+            rmpv::Value::Integer(250_i64.into()),
+        );
+        payload.insert(
+            "job_payload".to_owned(),
+            rmpv::Value::Map(vec![(
+                rmpv::Value::String("op".into()),
+                rmpv::Value::String("email".into()),
+            )]),
+        );
+
+        let enqueue =
+            crate::wire::envelope::WireEnvelope::new(ENQUEUE_MESSAGE_TYPE, "rid-enq", payload);
+        let frame = codec
+            .encode_frame(&enqueue.into_raw())
+            .expect("enqueue should encode");
+        let action = evaluate_worker_client_frame(&codec, &frame).expect("enqueue should pass");
+        assert!(matches!(
+            action,
+            WorkerProtocolAction::EnqueueRequested {
+                request_id,
+                queue_name,
+                max_attempts: Some(3),
+                retry_interval_ms: Some(250),
+                ..
+            } if request_id == "rid-enq" && queue_name == "critical"
+        ));
     }
 
     #[test]

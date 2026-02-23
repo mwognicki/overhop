@@ -71,6 +71,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Registered workers may use CREDIT (`t=8`, payload `sid` + positive `credits`) to increase credits on their own subscriptions only.
    - Registered workers may use RMQUEUE (`t=11`, payload `q`) to remove non-system queues only (`_`-prefixed queues are protected).
    - Registered workers may use PAUSE (`t=12`, payload `q`) and RESUME (`t=13`, payload `q`) for non-system queue state transitions.
+   - Registered workers may use ENQUEUE (`t=14`) to push jobs to non-system queues, with optional `job_payload`, `scheduled_at`, `max_attempts`, and `retry_interval_ms`.
 20. Connection/worker pools are implemented in `src/pools/mod.rs`:
    - New TCP connections must enter anonymous pool with `connected_at` and optional `helloed_at`.
    - Anonymous metadata should track optional IDENT reply deadline timestamp when IDENT challenge is issued.
@@ -83,8 +84,10 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Queue state pause/resume and bootstrap status must be serializable/restorable.
 22. Jobs orchestration base abstractions live in `src/orchestrator/jobs/mod.rs`:
    - New jobs must target an already registered queue by name.
+   - New jobs must not target system queues (`_` prefix).
    - Job IDs must follow `<queue-name>:<job-uuid>` while enqueue API returns the generated job UUID.
    - Default new-job status is `new`, and execution start timestamp must be `scheduled_at` or immediate time.
+   - Job runtime metadata must include `attempts_so_far`, initialized as `0` on job creation.
    - Optional retry interval must be strictly positive when provided.
    - Successful enqueue must trigger immediate persistence through storage backend integration points.
 23. Storage facade is implemented in `src/storage/mod.rs`:

@@ -259,6 +259,30 @@ Constraints:
 - queue must already be paused
 - queues with names starting with `_` are system queues and cannot be resumed
 
+### ENQUEUE (worker client -> server)
+
+- Message type: `t=14`
+- Allowed only for registered workers.
+- Payload:
+  - `q` (`string`, required): queue name
+  - `job_payload` (optional): JSON-compatible payload for the job itself
+  - `scheduled_at` (`string`, optional): RFC3339 execution timestamp (past values are allowed)
+  - `max_attempts` (`int`, optional): must be `>= 1` when provided
+  - `retry_interval_ms` (`int`, optional): must be `> 0` when provided
+
+Response:
+
+- success: `OK` (`t=101`) payload with:
+  - `jid` (`string`): generated job id (`<queue-name>:<uuid>`)
+- failure: `ERR` (`t=102`) with standard error payload
+
+Constraints:
+
+- queue must exist
+- queue must not be a system queue (`_` prefix)
+- worker does not need subscription to enqueue into a queue
+- envelope payload (`p`) and nested `job_payload` are distinct scopes
+
 ## Implemented Worker Subscription Flow
 
 ### SUBSCRIBE (worker client -> server)

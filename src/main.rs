@@ -24,6 +24,9 @@ use diagnostics::build_status_payload;
 use events::EventEmitter;
 use heartbeat::{HEARTBEAT_EVENT, Heartbeat};
 use logging::{LogLevel, Logger, LoggerConfig};
+use orchestrator::jobs::{
+    JobsPool, JobsPoolError, JobsStorageBackend, JobsStorageError, NewJobOptions,
+};
 use orchestrator::queues::{Queue, QueueState};
 use orchestrator::queues::persistent::{PersistentQueuePool, PersistentQueuePoolError};
 use pools::{ConnectionWorkerPools, PoolError};
@@ -67,7 +70,7 @@ fn main() {
         min_level: log_level,
         human_friendly: app_config.logging.human_friendly,
     }));
-    let storage = measure_execution(
+    let storage = Arc::new(measure_execution(
         "storage.initialize",
         Some("main::startup"),
         logger.as_ref(),
@@ -76,17 +79,20 @@ fn main() {
     .unwrap_or_else(|error| {
         eprintln!("storage initialization error: {error}");
         process::exit(2);
-    });
+    }));
     let self_debug_artifacts_path: Option<PathBuf> = if runtime_flags.enabled {
         Some(storage.data_path().to_path_buf())
     } else {
         None
     };
     let mut persistent_queues =
-        PersistentQueuePool::bootstrap(&storage, logger.as_ref()).unwrap_or_else(|error| {
+        PersistentQueuePool::bootstrap(storage.as_ref(), logger.as_ref()).unwrap_or_else(|error| {
             eprintln!("queue bootstrap error: {error}");
             process::exit(2);
         });
+    let mut jobs_pool = JobsPool::with_storage(Box::new(StorageFacadeJobsBackend::new(Arc::clone(
+        &storage,
+    ))));
     logger.log(
         LogLevel::Info,
         Some("main::orchestrator"),
@@ -248,8 +254,9 @@ fn main() {
             pools.as_ref(),
             wire_codec.as_ref(),
             logger.as_ref(),
-            &storage,
+            storage.as_ref(),
             &mut persistent_queues,
+            &mut jobs_pool,
             app_started_at,
         );
 
@@ -277,7 +284,7 @@ fn main() {
     );
     emitter.begin_shutdown();
     heartbeat.stop().expect("heartbeat should stop");
-    if let Err(error) = persistent_queues.persist_current_state(&storage) {
+    if let Err(error) = persistent_queues.persist_current_state(storage.as_ref()) {
         eprintln!("queue persistence error during shutdown: {error}");
         process::exit(2);
     }
@@ -730,6 +737,7 @@ fn process_worker_client_messages(
     logger: &Logger,
     storage: &StorageFacade,
     persistent_queues: &mut PersistentQueuePool,
+    jobs_pool: &mut JobsPool,
     app_started_at: DateTime<Utc>,
 ) {
     let read_buffer_len = wire_codec.max_envelope_size_bytes() + wire::codec::FRAME_HEADER_SIZE_BYTES;
@@ -887,6 +895,84 @@ fn process_worker_client_messages(
                             );
                         }
                     },
+                    Ok(WorkerProtocolAction::EnqueueRequested {
+                        request_id,
+                        queue_name,
+                        job_payload,
+                        scheduled_at,
+                        max_attempts,
+                        retry_interval_ms,
+                    }) => {
+                        if let Err((code, message)) =
+                            ensure_non_system_queue_for_worker(persistent_queues, &queue_name)
+                        {
+                            let _ = send_worker_protocol_error(
+                                wire_codec,
+                                logger,
+                                &connection,
+                                worker_id,
+                                &request_id,
+                                code,
+                                &message,
+                            );
+                            continue;
+                        }
+
+                        let enqueue_result = jobs_pool.enqueue_job(
+                            persistent_queues.queue_pool(),
+                            &queue_name,
+                            NewJobOptions {
+                                payload: job_payload,
+                                scheduled_at,
+                                max_attempts,
+                                retry_interval_ms,
+                            },
+                        );
+                        match enqueue_result {
+                            Ok(job_uuid) => {
+                                let mut payload = PayloadMap::new();
+                                payload.insert(
+                                    "jid".to_owned(),
+                                    rmpv::Value::String(format!("{queue_name}:{job_uuid}").into()),
+                                );
+
+                                match wire_codec
+                                    .encode_frame(&WireEnvelope::ok(request_id, Some(payload)).into_raw())
+                                {
+                                    Ok(frame) => {
+                                        write_response_frame(
+                                            &connection,
+                                            &frame,
+                                            connection.id(),
+                                            logger,
+                                            "ENQUEUE OK response",
+                                        );
+                                        let _ = pools.workers.touch_now(worker_id);
+                                    }
+                                    Err(error) => {
+                                        logger.warn(
+                                            Some("main::wire"),
+                                            &format!(
+                                                "failed to build ENQUEUE response for worker {worker_id}: {error}"
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                let (code, message) = map_jobs_pool_error_for_worker_error(&error);
+                                let _ = send_worker_protocol_error(
+                                    wire_codec,
+                                    logger,
+                                    &connection,
+                                    worker_id,
+                                    &request_id,
+                                    code,
+                                    &message,
+                                );
+                            }
+                        }
+                    }
                     Ok(WorkerProtocolAction::RemoveQueueRequested {
                         request_id,
                         queue_name,
@@ -1471,6 +1557,34 @@ fn map_pool_error_for_worker_error(error: &PoolError) -> (&'static str, String) 
     }
 }
 
+fn map_jobs_pool_error_for_worker_error(error: &JobsPoolError) -> (&'static str, String) {
+    match error {
+        JobsPoolError::QueueNotFound { queue_name } => {
+            ("QUEUE_NOT_FOUND", format!("queue '{queue_name}' not found"))
+        }
+        JobsPoolError::SystemQueueForbidden { queue_name } => (
+            "SYSTEM_QUEUE_FORBIDDEN",
+            format!("queue '{queue_name}' is a system queue and cannot accept jobs"),
+        ),
+        JobsPoolError::InvalidMaxAttempts { max_attempts } => (
+            "INVALID_MAX_ATTEMPTS",
+            format!("max_attempts must be >= 1, got {max_attempts}"),
+        ),
+        JobsPoolError::InvalidRetryIntervalMs { retry_interval_ms } => (
+            "INVALID_RETRY_INTERVAL_MS",
+            format!("retry_interval_ms must be > 0, got {retry_interval_ms}"),
+        ),
+        JobsPoolError::PayloadSerializationFailed(inner) => (
+            "INVALID_JOB_PAYLOAD",
+            format!("job payload serialization failed: {inner}"),
+        ),
+        JobsPoolError::Storage(inner) => (
+            "JOB_PERSISTENCE_ERROR",
+            format!("job persistence failed: {inner}"),
+        ),
+    }
+}
+
 fn map_persistent_queue_error_for_worker_error(
     error: &PersistentQueuePoolError,
     queue_name: &str,
@@ -1514,6 +1628,41 @@ fn map_persistent_queue_error_for_worker_error(
 
 fn queue_jobs_allow_removal(_queue_name: &str) -> bool {
     true
+}
+
+struct StorageFacadeJobsBackend {
+    storage: Arc<StorageFacade>,
+}
+
+impl StorageFacadeJobsBackend {
+    fn new(storage: Arc<StorageFacade>) -> Self {
+        Self { storage }
+    }
+}
+
+impl JobsStorageBackend for StorageFacadeJobsBackend {
+    fn persist_new_job(&self, job: &orchestrator::jobs::Job) -> Result<(), JobsStorageError> {
+        let record = serde_json::json!({
+            "uuid": job.uuid.to_string(),
+            "jid": job.job_id,
+            "queue_name": job.queue_name,
+            "payload": job.payload,
+            "status": "new",
+            "execution_start_at": job.execution_start_at.to_rfc3339(),
+            "max_attempts": job.max_attempts,
+            "retry_interval_ms": job.retry_interval_ms,
+            "created_at": job.created_at.to_rfc3339(),
+            "runtime": {
+                "attempts_so_far": job.runtime.attempts_so_far
+            }
+        });
+
+        self.storage
+            .upsert_job_record(job.uuid, &record)
+            .map_err(|source| JobsStorageError::PersistFailed {
+                reason: source.to_string(),
+            })
+    }
 }
 
 fn queue_metadata_payload(queue: &Queue) -> PayloadMap {
