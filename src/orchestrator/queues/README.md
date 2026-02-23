@@ -8,6 +8,7 @@ Provide foundational queue registry abstractions for queue orchestration with un
 
 - Queue is an autonomous serializable struct.
 - Queue pool enforces unique queue names.
+- Queue names are validated on registration (`[A-Za-z0-9_-]`, first char alphanumeric).
 - Queue state (active/paused) is persisted and recoverable.
 - Bootstrapping completion is explicitly marked by external orchestrator logic.
 

@@ -1,0 +1,3 @@
+- enforced queue name validation on queue registration and `ADDQUEUE` flow (`[A-Za-z0-9_-]`, first char alphanumeric)
+- added dedicated wire error mapping `INVALID_QUEUE_NAME` for invalid queue creation requests
+- documented queue-name constraints in wire protocol and queue module README

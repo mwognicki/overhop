@@ -79,6 +79,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Queue subscription mutations must validate queue existence against queue pool before attaching worker subscriptions.
 21. Queue orchestration queue pool base abstractions live in `src/orchestrator/queues/mod.rs`:
    - Queue names must remain unique in pool registration.
+   - Queue names must match `[A-Za-z0-9_-]` with the first character alphanumeric.
    - Queue state pause/resume and bootstrap status must be serializable/restorable.
 22. Jobs orchestration base abstractions live in `src/orchestrator/jobs/mod.rs`:
    - New jobs must target an already registered queue by name.
