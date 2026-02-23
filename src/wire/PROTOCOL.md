@@ -327,7 +327,7 @@ Constraints:
 - Allowed only for registered workers.
 - Payload:
   - `q` (`string`, required): queue name
-  - `status` (`string`, required): one of `new`, `delayed`, `waiting`, `failed`, `completed`
+  - `status` (`string`, required): one of `new`, `waiting`, `delayed`, `completed`, `failed`, `active`
   - `page_size` (`int`, optional): page size (`>= 1`), defaults to `pagination.page_size`
   - `page` (`int`, optional): page number (`>= 1`), defaults to `1`
 

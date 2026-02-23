@@ -104,6 +104,7 @@ This file defines repository-specific working rules for LLMs collaborating on Ov
    - Keep default data path rooted at `~/.overhop/data` with `~/` and `$HOME/` expansion support.
    - Keep engine-specific details behind storage backend abstractions so domain logic stays engine-agnostic.
    - Keep immutable sled keyspace prefixes versioned (`v1:q:` for queues, `v1:j:` primary jobs, `v1:j_qt:` queue-time job index, `v1:status:` job status key, `v1:status_fifo:` status FIFO index ordered by `created_at`).
+   - Keep per-queue status counters persisted under versioned keyspace (`v1:q_status:<queue>:<status>`) and update them on insert/status-transition/remove flows.
    - Keep ordered numeric key fragments encoded in big-endian sortable form for sled iterator correctness.
    - Keep storage abstraction and concrete engine implementations separated into dedicated files/modules.
 24. Persistent queue bootstrap flow is implemented in `src/orchestrator/queues/persistent.rs`:

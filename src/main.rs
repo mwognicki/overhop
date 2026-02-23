@@ -942,7 +942,7 @@ fn process_worker_client_messages(
                                 &request_id,
                                 "INVALID_JOB_STATUS_FILTER",
                                 &format!(
-                                    "unsupported status '{status}'; allowed values: new,delayed,waiting,failed,completed"
+                                    "unsupported status '{status}'; allowed values: new,waiting,delayed,completed,failed,active"
                                 ),
                             );
                             continue;
@@ -2483,7 +2483,10 @@ fn can_remove_job_by_status(status: &str) -> bool {
 }
 
 fn is_lsjob_status_allowed(status: &str) -> bool {
-    matches!(status, "new" | "delayed" | "waiting" | "failed" | "completed")
+    matches!(
+        status,
+        "new" | "delayed" | "waiting" | "failed" | "completed" | "active"
+    )
 }
 
 fn queue_metadata_payload(queue: &Queue) -> PayloadMap {
