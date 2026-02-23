@@ -1,0 +1,4 @@
+- updated main README with explicit top-level experimental disclaimer and clarified non-role-model Rust intent
+- documented that regular observation reports are currently published in the repository Wiki
+- added explicit note about deliberately kept imperfections as LLM interaction playground
+- expanded dependencies section with deliberate-choice framing, crates/version badges, and dependency purpose table
