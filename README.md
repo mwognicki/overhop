@@ -227,14 +227,14 @@ The plan is to write four client implementations: TypeScript, Python, Go, and Ru
 
 These dependencies are deliberate choices made for current architecture, protocol, and experimentation goals.
 
-![chrono](https://img.shields.io/badge/chrono-0.4.40-1f6feb?style=for-the-badge)
-![serde](https://img.shields.io/badge/serde-1.0.228-1f6feb?style=for-the-badge)
-![serde_json](https://img.shields.io/badge/serde__json-1.0.140-1f6feb?style=for-the-badge)
-![signal-hook](https://img.shields.io/badge/signal--hook-0.3.18-1f6feb?style=for-the-badge)
-![toml](https://img.shields.io/badge/toml-0.8.23-1f6feb?style=for-the-badge)
-![rmpv](https://img.shields.io/badge/rmpv-1.3.0-1f6feb?style=for-the-badge)
-![uuid](https://img.shields.io/badge/uuid-1.18.1-1f6feb?style=for-the-badge)
-![sled](https://img.shields.io/badge/sled-0.34.7-1f6feb?style=for-the-badge)
+[![chrono](https://img.shields.io/badge/chrono-0.4.40-1f6feb?style=any)](https://docs.rs/chrono)
+[![serde](https://img.shields.io/badge/serde-1.0.228-1f6feb?style=any)](https://docs.rs/serde)
+[![serde_json](https://img.shields.io/badge/serde__json-1.0.140-1f6feb?style=any)](https://docs.rs/serde_json)
+[![signal-hook](https://img.shields.io/badge/signal--hook-0.3.18-1f6feb?style=any)](https://docs.rs/signal-hook)
+[![toml](https://img.shields.io/badge/toml-0.8.23-1f6feb?style=any)](https://docs.rs/toml)
+[![rmpv](https://img.shields.io/badge/rmpv-1.3.0-1f6feb?style=any)](https://docs.rs/rmpv)
+[![uuid](https://img.shields.io/badge/uuid-1.18.1-1f6feb?style=any)](https://docs.rs/uuid)
+[![sled](https://img.shields.io/badge/sled-0.34.7-1f6feb?style=any)](https://docs.rs/sled)
 
 | Crate | Version | Purpose |
 | --- | --- | --- |
